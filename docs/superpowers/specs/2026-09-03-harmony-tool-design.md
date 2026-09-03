@@ -71,13 +71,16 @@ One screen, no modes, no navigation.
 │  ┌────┬────┬────┬────┬────┬────┬────┐              │
 │  │ i  │ II │III │ iv │ v° │ VI │vii │  ← chord pads│
 │  └────┴────┴────┴────┴────┴────┴────┘              │
+│  ┌──────────────┐                                  │
+│  │ ◉ Drone  E   │  ← held root, equal weight       │
+│  └──────────────┘                                  │
 │                                                    │
 │  Sound: [ Warm pad ▾ ]   Cutoff ──●──  Res ─●───   │
 │                                                    │
 │  ▓░▓░▓▓░▓░▓░▓▓░▓░▓░▓▓░▓░▓   ← keyboard, scale     │
 │  █ █ █ █ █ █ █ █ █ █ █ █ █     notes highlighted   │
 │                                                    │
-│  Playing: E – G – B  (i)                           │
+│  Playing: E – G – B   ·   1 – ♭3 – 5                │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -88,8 +91,24 @@ content.
 **Chord pads** — seven, one per scale degree, labelled in roman numerals.
 Uppercase is major, lowercase minor, `°` diminished, so the labels themselves
 show the scale's shape. Pads **latch**: press to start, press again to stop.
-**One chord at a time** — pressing a second pad releases the first, which is what
-hearing a progression requires.
+**One chord at a time** — pressing a second pad releases the first. Not because
+progressions demand it, but because two triads at once is mud, especially through
+a reverb: it hides the very interval the tool exists to make audible. The drone is
+the exception, and it is different in kind — a single sustained root is a
+reference point, not a competing chord. The cost is that a true suspension, one
+chord overlapping the next, cannot be heard.
+
+**Root drone** — a latching voice holding the tonic, given the same visual weight
+as the pad row rather than tucked among the sound settings. This is deliberate:
+it is not a helper for the chord tool but the *other* way harmony works in this
+music. Goa trance and hard techno build on a sustained tonal centre with modal
+melody over it, and chord changes can actively work against that character. A
+beginner should be able to see both mechanisms and notice they are different.
+
+It is also what makes a scale's character audible at all. The ♭2 that defines
+Phrygian sits in the II chord — which is *major*, and sounds bright in isolation.
+The darkness is in the relationship between that note and the root, so something
+has to hold the root for the relationship to exist.
 
 **Sound controls** — a preset dropdown, plus cutoff and resonance sliders that
 take effect on notes already sounding.
@@ -98,8 +117,13 @@ take effect on notes already sounding.
 notes in the selected scale are visually distinct. **Out-of-scale notes still
 play** — muting them would hide the very contrast the tool exists to teach.
 
-**Readout** — the notes currently sounding and, when they form a recognisable
-chord, its name and degree.
+**Readout** — the notes currently sounding, and their **scale degrees**
+(`E – G – B` / `1 – ♭3 – 5`). Deliberately *not* chord naming: three notes are
+ambiguous without knowing the intended root, and a readout that is confidently
+wrong is worse than none for someone who cannot yet tell. Degrees are also the
+better lesson — "you are playing the flat second" teaches the Phrygian character
+directly, where "that is F major" actively misleads, since F major sounds bright
+on its own.
 
 Deliberately absent: transport, record, save, and any octave control on the pads.
 Chords sound in a fixed register below the keyboard's range so a chord and a
@@ -125,8 +149,8 @@ melody do not collide.
    hands are free for the melody.
 9. As a player, I want pressing a second pad to replace the first, so that
    playing a progression needs no stop action.
-10. As a player, I want to be told what I am currently playing, so that I can
-    connect a sound I like back to its name.
+10. As a player, I want to be told which scale degrees I am playing, so that I
+    can connect a sound I like back to the interval that causes it.
 11. As someone who finds the current sound unpleasant, I want presets that sound
     like electronic music, so that I want to keep playing.
 12. As a player, I want a filter I can sweep while notes sound, so that the
@@ -198,9 +222,14 @@ Chord pads and the keyboard both make sound, and both go through the `noteOn` /
 `voice.stop()` handles that already exist — the pad holds its three voices, the
 keyboard holds its own. No new registry and no new concepts.
 
-The readout needs to know everything currently sounding, from both sources. That
-is one small piece of shared state: a set of active MIDI notes that both inputs
-write and the readout reads.
+The drone is a third source of sound, and works the same way — one latching voice
+at the root, held until toggled off. It lives with the chord pads rather than the
+sound controls because it is a harmonic control, not a timbral one.
+
+The readout needs to know everything currently sounding, from all three sources.
+That is one small piece of shared state: a set of active MIDI notes that the
+inputs write and the readout reads. Turning those notes into scale degrees is
+arithmetic against the current root — `Scales.js` again, no new logic.
 
 ## Testing
 
@@ -226,35 +255,51 @@ and highlighting are visual, and no assertion catches a layout that reads badly.
 
 ### Slice 1 — prove the idea works
 
-E Phrygian, hardcoded. Seven latching chord pads, triads. Keyboard highlights
-scale notes. One preset ("Warm pad") replacing the raw sawtooth, with filter and
-reverb in the graph. No scale picker — a picker with one entry is a lie.
+**Two scales — natural minor and Phrygian — with the picker.** Seven latching
+chord pads, triads, one at a time. Keyboard highlights scale notes. Root drone
+as a first-class control. **Two presets** — a pad and a pluck — replacing the raw
+sawtooth, with filter and reverb in the graph.
+
+Everything here is deliberately doubled where the spec's first draft had one, and
+each pair earns its place by making the slice a sharper *test* rather than a
+bigger build:
+
+- **Two scales**, because the tool's core hypothesis is that hearing the same
+  progression change from natural minor to Phrygian is the moment it becomes
+  worth using. One scale tests only whether the sound is nice. And Phrygian's
+  lesson is "natural minor with one note flattened" — without the baseline, the
+  contrast has nothing to land against.
+- **Two presets**, because the top risk below is that a preset sounds cheap. With
+  one, a bad result is ambiguous; with two, it separates "the sound design is
+  wrong" from "the whole idea is wrong."
+- **The drone**, because it is the primary mechanism for Goa and because without
+  it a scale's character is inaudible — see the Solution section.
+
+The readout is *not* here. It is the one addition that is purely additive rather
+than diagnostic, and it shares no machinery with anything else.
 
 **Done when:** pressing a pad gives a chord worth hearing, a melody over it feels
-good, and the response is "I want to keep doing this." If the answer is "this is
-unpleasant", the design is wrong and one build has been spent finding out rather
-than five.
+good, switching to Phrygian audibly changes the mood, and the response is "I want
+to keep doing this." If the answer is "this is unpleasant", the design is wrong
+and one build has been spent finding out rather than five.
 
-### Slice 2 — the scale picker
+### Slice 2 — the rest of the shortlist, and the readout
 
-The curated shortlist, each entry with its why-sentence. This is where learning
-actually starts: hearing the same progression in Phrygian and then in natural
-minor is the lesson. Mostly a data change, because slice 1 builds the structure.
+The remaining scales from the ranked list, each with its why-sentence — Dorian,
+harmonic minor, Phrygian dominant, and Lydian if ambient is worth covering. A
+data change, because slice 1 builds the structure.
 
-### Slice 3 — the readout
+Plus the readout: notes and their scale degrees.
 
-"You are playing E–G–B, that is i." Third because it is the only piece that is
-real logic rather than data, and the tool works without it.
-
-### Slice 4 — widening
+### Slice 3 — widening
 
 More presets, and the triads/sevenths toggle. Both pure widening.
 
 ### Later, not planned
 
 Generative melodies and basslines — which needs a clock, and brings the
-sequencer vocabulary back. MIDI input. Any of it may change once slices 1–3 have
-actually been used.
+sequencer vocabulary back. MIDI input. Any of it may change once slices 1 and 2
+have actually been used.
 
 ## The scale shortlist
 
@@ -312,3 +357,18 @@ small change.
 this is a five-minute toy rather than a twenty-minute one. That is the honest
 cost of deferring the clock, and slice 1's "done when" is the test of whether it
 matters.
+
+**Triads may be the wrong voicing for the genre being taught.** The research
+found melodic techno characteristically uses sparse two- and three-note voicings
+rather than full triads, and deep house extends to m7 and m9 rather than playing
+plain triads at all. The pads play triads because they are the clearest thing to
+learn from — a triad is the shape that makes major, minor and diminished
+legible. But it means the tool teaches a voicing the genre does not much use.
+Known and accepted for now; the sevenths toggle in slice 3 narrows the gap.
+
+**Slice 1 grew during grilling**, from one scale and one preset to two of each
+plus the drone. Each addition had a good local argument, which is exactly how
+"lean" dies. It was reviewed as a whole and kept, on the grounds that every pair
+makes the slice a sharper test rather than a broader build, and that the readout
+— the one purely additive piece — was moved out. Worth re-checking against the
+same standard if it grows again.

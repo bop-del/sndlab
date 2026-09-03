@@ -12,6 +12,17 @@ dominant**, as opposed to natural minor with one borrowed note. That specific
 claim is repeated constantly on production forums and rarely demonstrated
 against real tracks. Treat sections 1 and 5 below as the load-bearing ones.
 
+**Section 6 below extends this research** to melodic techno, progressive
+house, organic house, and Goa trance — genres the original research did not
+cover — and directly tests the "electronic music avoids chord progressions"
+generalization from section 4 against them. Short version: that
+generalization is true of hard/minimal techno and Goa trance specifically,
+false of melodic techno and progressive/organic house, which are genuinely
+chord-progression-driven genres built on extended (m7/m9/sus/add9) harmony.
+Goa trance turns out to be the one place in this whole document where the
+harmonic minor / Phrygian dominant claim holds up better than elsewhere, but
+even there it governs melody over a drone, not chord changes.
+
 ## 1. What's actually dominant, by subgenre
 
 **Across EDM generally:** minor keys outnumber major. The one academic
@@ -295,3 +306,300 @@ whole, balanced against how distinct and teachable its character is.
    to cover ambient; it's the one scale here that is not minor-family and
    would demonstrate that electronic music isn't monolithically minor. Cut
    it first if the shortlist needs to shrink to five.
+
+## 6. Extension: melodic techno, progressive/organic house, and Goa trance
+
+The original research above did not cover melodic techno, progressive
+house, organic house, or Goa trance, and its claim in section 4 that
+"techno / minimal ... frequently no chord progression at all" reads, out of
+context, like a claim about electronic music generally. It is not — it is
+specific to hard/minimal techno. This section covers the chord-driven end
+of the spectrum plus Goa trance, which turns out to be a genuinely
+different case from both.
+
+### 6.1 Melodic techno (Tale of Us, Afterlife, Massano, Anyma, Mind Against, Adriatique)
+
+This genre is built on **sustained, extended minor harmony with real chord
+movement**, not static vamps. Minor keys are near-universal in the sources
+found — one production guide states the rule flatly: "major chords break
+the spell. Stick to minor, diminished, and suspended voicings"
+([Chordoo, "Melodic Techno Chord Progressions: Dark & Emotional
+Guide"](https://www.chordoo.com/blog/melodic-techno-chord-progressions-for-dark-atmosphere)).
+The same source names a specific four-chord loop, **i–VI–III–VII** (e.g.
+Am–F–C–G), and attributes it directly to "Tale Of Us, Anyma, the Afterlife
+roster" — the same progression family as the natural-minor techno/house
+loop already documented in section 4, just voiced richer and held longer
+(single chords sustaining "8, 16, even 32 bars" is claimed, though not
+independently verified against a specific track's arrangement). The same
+guide names **harmonic minor and Dorian** as the modal-borrowing devices
+used for an "exotic, otherworldly" lift — consistent with the trance
+borrowed-7th pattern in section 1, not a new mechanism. This is a single
+production blog, not a corpus study, so treat the named progression and the
+sustain-length claim as informed practitioner opinion, not measurement.
+
+Extended and reduced voicings both show up, and sources are explicit that
+plain triads are *not* the norm: two- or three-note sparse voicings
+("Am as just A–E, no C") are described as more characteristic than a full
+triad, attributed to Boris Brejcha and ARTBAT's style, while at the other
+end m7/sus tones color the sustained chords for tension
+([Chordoo](https://www.chordoo.com/blog/melodic-techno-chord-progressions-for-dark-atmosphere)).
+A second production walkthrough covering Anyma, Miss Monique, ARTBAT, and
+Stephan Bodzin is far thinner on theory — it names A minor and gives two
+progressions (Am–F–C–G; Am–Dm–Em–C) but does not discuss modes or chord
+extensions at all, instead outsourcing the harmony to a chord-generator
+plugin ("Scaler 3 ... 'Melodic Techno' chord set")
+([Beatportal, "Step-by-Step Guide to Creating a Melodic House & Techno
+Track"](https://www.beatportal.com/articles/899368-step-by-step-guide-to-creating-a-melodic-house-techno-track-anyma-miss-monique-artbat-stephan-bodzin)).
+That is itself informative: even genre-specific production education
+treats "minor key, a few workhorse progressions" as sufficient, rather than
+reaching for exotic modes.
+
+What gives melodic techno its recognizable emotional quality is, by the
+sources found, **arrangement and timbre more than harmonic novelty**. A
+Native Instruments production guide credits "gradually progressing track
+structure," long reverbs/delays creating "lush soundscapes," and rhythmic
+melodic devices (stutters, pitch bends) — it never once names a specific
+scale or chord extension as the genre's defining harmonic trait
+([Native Instruments Blog, "How to make a melodic techno
+track"](https://blog.native-instruments.com/melodic-techno/)). Combined
+with the Chordoo/Beatportal sources above, the honest read is: the chords
+are genuinely there and genuinely minor-key, but the "Afterlife sound" is
+mostly manufactured by slow harmonic rhythm, layering, and reverb tails —
+not by an unusual scale choice.
+
+### 6.2 Progressive house and organic house (Lane 8, Yotto, Ben Böhmer, Tinlicker)
+
+Weaker sourcing here — most hits were tutorial-course listings (Ben Böhmer
+style chord-progression lessons on Teachable/Patreon) whose actual
+technical content sits behind a paywall, so this is thinner evidence than
+6.1. What is available:
+
+- Progressive/melodic house is explicitly framed as "emphasiz[ing]
+  harmonic chord progressions and intricate arpeggios," with basslines and
+  chord progressions designed to interlock
+  ([EDMProd, "How to Make Melodic
+  House"](https://www.edmprod.com/how-to-make-melodic-house/)).
+- Organic house is described as built on "melancholic chord progressions"
+  and "blissful harmonies" specifically to feed Deep and Progressive House
+  ([Big Fish Audio, Organic House sample
+  pack](https://www.bigfishaudio.com/bing-organic-house)) — a marketing
+  description, weak as a technical source, but directionally consistent
+  with the deep-house extended-chord material already in the original
+  document (section 1 and section 4: m7/m9 over minor loops).
+- One production-blog statistic, uncorroborated elsewhere, claims "roughly
+  60 to 65% of charted house tracks are built on a minor-mode base, often
+  using loops like i–VI–III–VII or i–VII–III–VII"
+  ([DrumLoopAI, "8 Essential House Chord Progressions for
+  2026"](https://www.drumloopai.com/blog/house-chord-progressions/)). No
+  methodology is given for how "charted" or the percentage was derived —
+  treat this as an unverified number from a content-marketing blog, not a
+  measurement, though it is at least a concrete figure rather than pure
+  assertion.
+- Verified keys via Tunebat (automated key detection, same caveat as
+  section 3 applies): Lane 8's "Atlas" is **F♯ major**
+  ([Tunebat](https://tunebat.com/Info/Atlas-Lane-8/4gx9edHLyQtb69ibMUyTxJ)),
+  and Ben Böhmer's "In Memoriam" is **D major**
+  ([Beatport track
+  page](https://www.beatport.com/track/in-memoriam-original-mix/12812098)).
+  These two data points push back on any assumption that progressive/organic
+  house is minor-key by default the way techno is — this corner of the
+  genre space uses major keys often enough that "minor dominates" cannot be
+  asserted for it with the confidence the document uses elsewhere. This is
+  only two tracks, not a sample; flag it as a direction, not a statistic.
+
+On extensions: no source found here was as explicit as the melodic-techno
+sources in 6.1, but the same jazz-derived m7/m9 vocabulary documented for
+deep house in the original section 1 is the consistent thread across every
+adjacent description of organic/progressive house harmony. Nothing found
+contradicts it; nothing found adds a new chord type beyond what section 1
+already claims for deep house.
+
+### 6.3 The correction: is "electronic music avoids chord progressions" fair?
+
+**Verdict: false as a broad claim, true of a specific and narrower set of
+subgenres.** The original document's section 4 line — "techno / minimal:
+frequently no chord progression at all" — is accurate but scoped to
+hard/minimal techno (and, per section 6.4 below, Goa trance). It does not
+generalize to "electronic music" as a category, and the document should not
+be read that way.
+
+- One source puts the split explicitly in genre terms: "House uses chord
+  progressions, vocal hooks, and melodic phrases ... In contrast, techno
+  uses minimal melodic elements, and the musical interest in techno comes
+  from rhythmic variation and sound design, not harmonic progression"
+  ([Orphiq, "House vs Techno: 10
+  Differences"](https://orphiq.com/resources/house-vs-techno-comparison)) —
+  a comparison-content blog, not authoritative, but it matches the pattern
+  found independently across every other source in this section.
+- Melodic techno (6.1) and progressive/organic house (6.2) are both
+  described, across every source found, as chord-progression-driven — named
+  progressions, named degrees, sustained chords with real harmonic rhythm.
+  This is the opposite of "no chord progression."
+- Minimal/hard techno and hard-dance peak-time techno remain the genuine
+  exception — the original document's section 4 claim stands for that
+  narrower target.
+- Trance (already covered in section 1) sits in between: it has real
+  chord-progression moments (the vi–IV–I–V "anthem lift"), but a large
+  share of a trance track's runtime is a static minor loop under a lead
+  melody, closer to the techno end than to melodic techno.
+
+**Balanced verdict:** electronic dance music is not one thing harmonically.
+Roughly, hard/minimal techno and Goa trance sit at the "static tonal
+center, no real progression" end; melodic techno, progressive house, and
+organic house sit at the "real, extended, chord-progression-driven" end;
+house (broadly), trance, and psytrance sit in between, with real but
+infrequent harmonic movement layered over long static stretches. A learning
+tool that only taught "electronic music = one static minor chord" would
+misrepresent roughly half of what's covered in this document.
+
+### 6.4 Goa trance (Astral Projection, Hallucinogen, Man With No Name, Etnica, early Infected Mushroom, Juno Reactor, Total Eclipse, California Sunshine)
+
+Goa is the one genre in this whole document where the harmonic minor /
+Phrygian dominant claim — treated skeptically in section 5 for hard dance
+and modern psytrance — comes closest to holding up, but it holds up as a
+**melodic/modal claim, not a chord-progression claim**, and that
+distinction matters for tool design.
+
+**Scales/modes.** Multiple sources converge on the same list: Phrygian,
+Phrygian dominant, Dorian, natural minor, and harmonic minor, with Phrygian
+and Phrygian dominant repeatedly singled out as most characteristic
+("Goa trance harmony is sparse and modal, often featuring minor, Phrygian,
+or Phrygian dominant scales... A classic Nizhonot Goa scale is the Spanish
+phrygian, or phrygian dominant as it's called in jazz") and explicitly
+linked to "Arabic/Indian" and raga-adjacent melodic influence
+([Melodigging, "Goa
+Trance"](https://www.melodigging.com/genre/goa-trance); corroborated by
+forum discussion at
+[PsyMusic UK](https://www.psymusic.co.uk/forum/threads/musicology-what-are-the-modals-scale-in-the-various-psy-goa-styles.74016/)
+and
+[KVR Audio](https://www.kvraudio.com/forum/viewtopic.php?t=390962)). None of
+these are academic or journalistic sources — Melodigging is a music-data
+blog that synthesizes Spotify/Wikipedia/Discogs metadata into editorial
+descriptions, and the forums are hobbyist discussion, one participant
+explicitly stating "no music theory background." But the *convergence*
+across independent, non-affiliated sources on the same short list of modes
+is stronger corroboration than anything found for hard dance in section 5 —
+there, sources actively disagreed; here, they agree. Treat this as
+well-corroborated folk wisdom, one notch more credible than the hard-dance
+claim, still not corpus-measured.
+
+**How harmony actually works: drone plus melody, not chord pads.** This is
+the key structural finding, and it directly contradicts a chord-pad mental
+model for this genre. Sources are consistent and specific: "chords and
+harmonies play a very minor role in psytrance, instead featuring a focused
+drone pitch and an implied scale from which almost all the melodies are
+drawn. Basslines usually play the drone note with small derivations in
+chromatic shifts" — and a KVR forum poster with the most substantive,
+theory-literate contribution in that thread makes the point explicitly:
+Goa/psytrance benefits from staying "on one 'key note', sticking to the one
+'phrygian' for the duration," warning that Western-style chord changes can
+actively "obliterate" the modal character
+([KVR Audio forum](https://www.kvraudio.com/forum/viewtopic.php?t=390962)).
+Melodigging corroborates: "keep chord changes sparse; let evolving motifs,
+counter-melodies, and filter automation supply movement"
+([Melodigging](https://www.melodigging.com/genre/goa-trance)). The genre's
+identifying feature — long TB-303-style acid arpeggios and layered lead
+lines — sits melodically over this static harmonic floor rather than
+being harmonized by a chord progression underneath it.
+
+**The drone/pedal tone is structurally central**, more so than in any other
+genre in this document, including ambient. Multiple sources describe the
+rolling, 16th-note "galloping" bassline as itself the drone — not a
+bassline that outlines chord roots, but one that repeats the tonal center
+with rhythmic/chromatic ornamentation while the mode is stated melodically
+above it. For a learning tool: **this is a real argument for offering a
+held/sustained root-note drone as an alternative teaching mechanism to
+chord pads**, specifically for this genre — a chord-pad-only tool would
+misrepresent how Goa harmony is actually built.
+
+**Scale degrees carrying the sound.** The ♭2 (Phrygian's signature) is
+repeatedly named as central — one source notes producers "emphasize the
+second, third and seventh notes of the scale, instead of the emphasis on
+the fourth and fifth in rock and pop" specifically to bring out the
+Phrygian color. The augmented-second gap (♭2 to natural 3) that defines
+Phrygian dominant is named directly via the "Spanish Phrygian" reference
+above. This is consistent, repeated evidence for the ♭2 and the ♭2-to-3
+augmented second as real, present melodic intervals in Goa leads — stronger
+evidence for this specific interval claim than anything found for
+hard-dance/psytrance in section 5, where the same interval was described
+only generically.
+
+**Verified examples — and a caution.** Key-detection sources disagree with
+each other here exactly as they did for Sandstorm in section 3, which
+reinforces that caveat rather than adding a new one. Astral Projection's
+"Mahadeva" is cited as **F minor** in one source discussing the original
+1994 release, but a separate search snippet returned "F Major" for what
+appears to be a different listing of the same title — the sources
+contradict each other and neither is a primary transcription, so **the key
+of "Mahadeva" should be treated as unverified**, not asserted either way
+([Beatport track listings](https://www.beatport.com/track/mahadeva-original-mix/1891919);
+conflicting search-indexed claims, no single authoritative source
+resolved). No reliable key was found at all for Hallucinogen's "LSD" or
+"Twisted" material, or for Etnica, Man With No Name, Total Eclipse, Juno
+Reactor, or California Sunshine tracks — Tunebat listing pages exist for
+several of these but returned no accessible key data in this research
+(direct fetch was blocked by the site; search-snippet indexing did not
+surface the key field). **Per the document's existing precedent (Sandstorm),
+this research will not assert a specific key for any named Goa track with
+confidence** — if the learning tool needs a canonical Goa example, the key
+should be verified by ear or transcription, not cited from these sources.
+
+**Goa vs. modern psytrance — where they diverge.** The original document
+(section 1) already describes modern psytrance as: mostly a static
+minor/drone groove with Phrygian dominant confined to "lead/arp lines and
+intros," not the harmonic foundation of the track. Goa evidence in this
+section describes essentially the same structural pattern — drone-plus-mode,
+not chord-driven — so **this section does not contradict section 5's
+psytrance finding; it extends the same finding backward to Goa's origins**.
+The one real difference found: sources on Goa specifically lean harder on
+explicit Eastern/raga framing and name Phrygian dominant more insistently
+as a defining color (vs. modern psytrance sources, which hedge more and
+describe a wider range of scale choices including plain minor and
+darker/more chromatic material in neurofunk-adjacent hybrid subgenres).
+This is a difference of degree and emphasis in the sources, not a
+documented difference in actual practice — no source directly compared
+"classic Goa 1994-1998" material against "modern psytrance 2015+" material
+track-for-track.
+
+### 6.5 Does this change the recommended shortlist?
+
+**Yes, in one respect, flagged here rather than edited into the existing
+recommendation section per instructions.**
+
+The existing shortlist (natural minor, Phrygian, Dorian, harmonic minor,
+Phrygian dominant, Lydian-optional) was built primarily around what scale
+is *audible as the tonal material*. The melodic techno and progressive/
+organic house research in 6.1–6.2 doesn't change that ranking — it uses the
+same scales (natural minor overwhelmingly, harmonic minor and Dorian as
+accents) already at the top of the list. Nothing here argues for adding a
+new scale.
+
+What it does change is the case for teaching **chord progressions and
+extended chords as a first-class feature**, not an afterthought. The
+existing document's framing (sections 4–5) emphasizes static vamps and
+riff-based harmony as typical of electronic music. Given that melodic
+techno and progressive/organic house are both large, currently-thriving,
+mainstream subgenres built on real i–VI–III–VII-family progressions with
+m7/m9/sus color — and given that these are explicitly two of Boris's
+favorite genres alongside Goa — a tool that only demonstrates static
+one-chord loops undersells a major and currently-fashionable part of the
+genre space. **Concretely: the natural minor, Dorian, and harmonic minor
+entries already in the shortlist are sufficient scale material for melodic
+techno and progressive house; what's missing from the tool, based on this
+research, is a chord-progression mode (cycling through i–VI–III–VII with
+m7/m9 voicings) sitting alongside whatever static-drone mode the tool uses
+for techno and Goa.**
+
+For Goa specifically, the finding in 6.4 suggests the opposite design
+implication: a **held root-note drone with melodic movement above it** is
+more faithful to how the genre actually works than a chord-progression
+pad, and Phrygian / Phrygian dominant should be presented as the
+melodic-mode choice for that drone, not as a set of chords to progress
+through. If the tool is meant to represent Boris's two favorite genres
+well, it likely needs **both mechanisms** — a chord-progression engine for
+melodic techno/progressive house, and a drone-plus-mode engine for Goa —
+rather than a single harmonic model applied uniformly across the shortlist.
+This is a design observation, not a scale-list change: the six scales
+already ranked remain the right six: nothing in this research surfaces a
+scale used by melodic techno, progressive house, or Goa that isn't already
+on the list.
