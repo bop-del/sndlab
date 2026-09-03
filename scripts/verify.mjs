@@ -417,6 +417,31 @@ const checks = [
         },
     },
     {
+        name: 'the note rows follow physical position, not the character typed',
+        async run(page) {
+            // On QWERTZ the bottom-left key emits 'y', on AZERTY 'w'. Mapping on
+            // event.key scrambles the row for every non-QWERTY layout; mapping
+            // on event.code makes the position the identity. Simulated here by
+            // sending the German pairing: code KeyZ carrying the character 'y'.
+            await page.evaluate(() => {
+                window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyZ', bubbles: true }));
+            });
+
+            const spy = await audioSpy(page);
+            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (started.length !== 1) throw new Error(`expected 1 oscillator from the physical Z key, got ${started.length}`);
+            if (Math.abs(started[0].frequency - 262) > 1) {
+                throw new Error(`the physical Z key should play C4 (~262 Hz), got ${started[0].frequency}`);
+            }
+            if (!(await isLit(page, 60))) throw new Error('the C4 key is not lit');
+
+            await page.evaluate(() => {
+                window.dispatchEvent(new KeyboardEvent('keyup', { key: 'y', code: 'KeyZ', bubbles: true }));
+            });
+            if (await isLit(page, 60)) throw new Error('the note did not release');
+        },
+    },
+    {
         name: 'the whole upper octave sounds',
         async run(page) {
             // The upper row being dead entirely went undetected: every check

@@ -15,12 +15,18 @@ const BLACK_WIDTH = 28;
 // ticket named `awsedftgyhuj` for the lower octave, but that collides with the
 // upper row on w/e/t/y/u — the Z row is the conventional resolution and the one
 // muscle memory actually carries.
-const LOWER_ROW = 'zsxdcvgbhnjm';
-const UPPER_ROW = 'q2w3er5t6y7u';
+//
+// Keyed by physical position (`KeyboardEvent.code`), not by the character the
+// key produces. A piano row is a shape under the hand, so what matters is where
+// the key *is*: on QWERTZ the bottom-left key reports 'y', on AZERTY 'w'. Using
+// event.key scrambles the row for everyone not on QWERTY; using event.code makes
+// every layout work with no detection, because the position is the identity.
+const LOWER_ROW = ['KeyZ', 'KeyS', 'KeyX', 'KeyD', 'KeyC', 'KeyV', 'KeyG', 'KeyB', 'KeyH', 'KeyN', 'KeyJ', 'KeyM'];
+const UPPER_ROW = ['KeyQ', 'Digit2', 'KeyW', 'Digit3', 'KeyE', 'KeyR', 'Digit5', 'KeyT', 'Digit6', 'KeyY', 'Digit7', 'KeyU'];
 
 const KEY_TO_NOTE = new Map();
-for (const [i, key] of [...LOWER_ROW].entries()) KEY_TO_NOTE.set(key, FIRST_NOTE + i);
-for (const [i, key] of [...UPPER_ROW].entries()) KEY_TO_NOTE.set(key, FIRST_NOTE + 12 + i);
+for (const [i, code] of LOWER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + i);
+for (const [i, code] of UPPER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + 12 + i);
 
 export const Keyboard = {
     // One source of truth for what is sounding: MIDI number → voice handle.
@@ -180,7 +186,7 @@ export const Keyboard = {
                 return;
             }
 
-            const midiNumber = KEY_TO_NOTE.get(event.key.toLowerCase());
+            const midiNumber = KEY_TO_NOTE.get(event.code);
             if (midiNumber === undefined) return;
             event.preventDefault();
             // press() does not retrigger a note already held, so auto-repeat is
@@ -199,7 +205,7 @@ export const Keyboard = {
                 return;
             }
 
-            const midiNumber = KEY_TO_NOTE.get(event.key.toLowerCase());
+            const midiNumber = KEY_TO_NOTE.get(event.code);
             if (midiNumber === undefined) return;
             this.release(midiNumber, 'note-row');
         });
