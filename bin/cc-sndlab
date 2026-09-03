@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+
+# Open sndlab in Claude Code with the engineering skills loaded.
+# Usage: cc-sndlab [claude arguments...]
+
+REPO="$HOME/code/sndlab"
+SKILLS="$HOME/code/mattpocock-skills"
+
+cd "$REPO" || { echo "✗ $REPO not found"; exit 1; }
+
+# GitHub account — bop-del, not the HeyJobs one
+if command -v gh > /dev/null 2>&1; then
+  GH_USER=$(gh api user --jq .login 2>/dev/null)
+  case "$GH_USER" in
+    bop-del) echo "  ✓ GitHub: bop-del" ;;
+    "")      echo "  ⚠ GitHub not logged in — 'gh auth login'" ;;
+    *)       echo "  ⚠ GitHub account is '$GH_USER' — 'gh auth switch --user bop-del'" ;;
+  esac
+else
+  echo "  ⚠ gh CLI missing — the issue skills will not work"
+fi
+
+# Engineering skills as a plugin (Matt Pocock)
+if [ -d "$SKILLS/.claude-plugin" ]; then
+  echo "  ✓ Skills: mattpocock-skills"
+  set -- --plugin-dir "$SKILLS" "$@"
+else
+  echo "  ⚠ Skills repo missing: $SKILLS"
+  echo "    git clone https://github.com/mattpocock/skills.git $SKILLS"
+fi
+
+echo ""
+exec claude "$@"

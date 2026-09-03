@@ -1,0 +1,131 @@
+#!/usr/bin/env sh
+
+# Health check for sndlab: prerequisites + deploy chain.
+# Changes nothing. Safe to run any number of times.
+# Usage: bin/setup
+
+REPO="$HOME/code/sndlab"
+SKILLS="$HOME/code/mattpocock-skills"
+LIVE="https://bop-del.github.io/sndlab"
+WARN=0
+
+ok()   { echo "  ✓ $1"; }
+warn() { echo "  ⚠ $1"; WARN=$((WARN + 1)); }
+
+echo ""
+echo "Prerequisites"
+echo "─────────────"
+
+# gh CLI + account
+if command -v gh > /dev/null 2>&1; then
+  GH_USER=$(gh api user --jq .login 2>/dev/null)
+  case "$GH_USER" in
+    bop-del) ok "gh CLI, logged in as bop-del" ;;
+    "")      warn "gh CLI present but not logged in — 'gh auth login'" ;;
+    *)       warn "gh logged in as '$GH_USER' — 'gh auth switch --user bop-del'" ;;
+  esac
+else
+  warn "gh CLI missing — 'brew install gh'"
+fi
+
+# python3 for the dev server
+if command -v python3 > /dev/null 2>&1; then
+  ok "python3 ($(python3 --version 2>&1 | cut -d' ' -f2))"
+else
+  warn "python3 missing — cannot start the dev server"
+fi
+
+# Engineering skills
+if [ -d "$SKILLS/.claude-plugin" ]; then
+  N=$(grep -c '"\./skills/' "$SKILLS/.claude-plugin/plugin.json" 2>/dev/null || echo "?")
+  ok "mattpocock-skills ($N skills)"
+else
+  warn "skills repo missing: $SKILLS"
+fi
+
+# Git identity — the work account must never appear in this repo
+GIT_MAIL=$(git -C "$REPO" config user.email 2>/dev/null)
+case "$GIT_MAIL" in
+  boris.diebold+gh@gmail.com) ok "git identity: $GIT_MAIL" ;;
+  *heyjobs*)                  warn "git identity is the WORK account ($GIT_MAIL) — 'git config user.email boris.diebold+gh@gmail.com'" ;;
+  "")                         warn "no repo-local git identity — 'git config user.email boris.diebold+gh@gmail.com'" ;;
+  *)                          warn "git identity is $GIT_MAIL" ;;
+esac
+
+if git -C "$REPO" log --all --format='%ae %ce' 2>/dev/null | grep -qi heyjobs; then
+  warn "work account found in commit history — rewrite before pushing"
+else
+  ok "no work account in history"
+fi
+
+# Git remote
+REMOTE=$(git -C "$REPO" remote get-url origin 2>/dev/null)
+case "$REMOTE" in
+  *bop-del/sndlab*) ok "remote: bop-del/sndlab" ;;
+  "")               warn "no git remote configured" ;;
+  *)                warn "remote points at $REMOTE" ;;
+esac
+
+# Shell alias
+if grep -q "cc-sndlab" "$HOME/.zshrc" 2>/dev/null; then
+  ok "alias cc-sndlab in ~/.zshrc"
+else
+  warn "alias missing — add to ~/.zshrc:"
+  echo "      alias cc-sndlab='~/code/sndlab/bin/cc-sndlab'"
+fi
+
+echo ""
+echo "Deploy chain"
+echo "────────────"
+
+if command -v curl > /dev/null 2>&1; then
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "$LIVE/" 2>/dev/null)
+  if [ "$CODE" = "200" ]; then
+    ok "live: $LIVE/"
+  else
+    warn "live page answered HTTP $CODE"
+  fi
+
+  # ES modules need the right MIME type or the browser refuses to load them
+  for f in js/main.js js/ui/UI.js js/audio/AudioEngine.js css/base.css; do
+    RESULT=$(curl -s -o /dev/null -w "%{http_code} %{content_type}" "$LIVE/$f" 2>/dev/null)
+    STATUS=$(echo "$RESULT" | cut -d' ' -f1)
+    TYPE=$(echo "$RESULT" | cut -d' ' -f2 | cut -d';' -f1)
+    if [ "$STATUS" = "200" ]; then
+      case "$f:$TYPE" in
+        *.js:application/javascript|*.js:text/javascript) ok "$f" ;;
+        *.css:text/css)                                   ok "$f" ;;
+        *) warn "$f — HTTP 200 but content-type is '$TYPE'" ;;
+      esac
+    else
+      warn "$f — HTTP $STATUS"
+    fi
+  done
+else
+  warn "curl missing — cannot check the deploy"
+fi
+
+echo ""
+echo "Still manual"
+echo "────────────"
+if [ -f "$REPO/docs/agents/issue-tracker.md" ]; then
+  ok "issue tracker configured"
+else
+  echo "  □ configure the repo for the engineering skills"
+  echo "    → start cc-sndlab, then: \"work through docs/SETUP.md\""
+fi
+
+ISSUES=$(gh issue list --repo bop-del/sndlab --state open --json number --jq 'length' 2>/dev/null)
+if [ -n "$ISSUES" ] && [ "$ISSUES" -gt 0 ] 2>/dev/null; then
+  ok "$ISSUES open issues"
+else
+  echo "  □ create the first issues (see docs/SETUP.md, step 3)"
+fi
+
+echo ""
+if [ "$WARN" -eq 0 ]; then
+  echo "All green."
+else
+  echo "$WARN warning(s) — see above."
+fi
+echo ""
