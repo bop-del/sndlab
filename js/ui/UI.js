@@ -3,6 +3,7 @@ import { ChordPads } from './ChordPads.js';
 import { Keyboard } from './Keyboard.js';
 import { ScalePicker } from './ScalePicker.js';
 import { SoundControls } from './SoundControls.js';
+import { VersionTag } from './VersionTag.js';
 
 // Composition root: find the mount points, hand them to the components, and
 // wire the dependencies between them. Everything hangs off the selected scale.
@@ -17,6 +18,7 @@ export const UI = {
         });
         ScalePicker.init(document.getElementById('scale-picker'));
         SoundControls.init(document.getElementById('sound-controls'));
+        VersionTag.init(document.getElementById('version-tag'));
 
         // Blur drops every note however it was started, so the pads must stop
         // claiming to be on — a lit pad holding nothing is a lie about state.

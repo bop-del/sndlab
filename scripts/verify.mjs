@@ -161,6 +161,58 @@ function installAudioSpy() {
     wrap(window.webkitOfflineAudioContext);
 }
 
+// ─── Silence ─────────────────────────────────────────────────────────────────
+// A verification run must not play out loud. Headless is not silent: measured
+// on macOS, chromium *and* webkit each open a real coreaudiod output stream
+// while a tone runs (an `audio-out BuiltInSpeakerDevice` assertion appears for
+// the duration and goes again on close), so both engines genuinely sound the
+// forty-odd notes the checks trigger.
+//
+// Chromium has `--mute-audio` for this. WebKit exposes no equivalent through
+// Playwright, and a fix that silenced one engine and not the other would leave
+// half the run audible — so the mute goes in the page, where both engines are
+// the same.
+//
+// It costs no coverage. The spy records `type`, `frequency`, `started` and
+// `stopped`, all set on the JS side of the graph before a sample reaches the
+// device. This inserts a zero gain at the very last hop, between the graph and
+// the speakers: everything the checks assert on still happens, and nothing
+// comes out.
+
+function silenceOutput() {
+    const mute = (Ctor) => {
+        if (!Ctor) return;
+        const proto = Ctor.prototype;
+        const real = Object.getOwnPropertyDescriptor(proto, 'destination');
+        if (!real?.get) return;
+
+        // One muted node per context, built lazily: `destination` is read on
+        // every connect(), and a fresh node each time would leave the graph
+        // fanning out into nodes nothing else references.
+        const muted = new WeakMap();
+        Object.defineProperty(proto, 'destination', {
+            configurable: true,
+            enumerable: real.enumerable,
+            get() {
+                const destination = real.get.call(this);
+                if (!muted.has(this)) {
+                    const gain = this.createGain();
+                    gain.gain.value = 0;
+                    gain.connect(destination);
+                    muted.set(this, gain);
+                }
+                return muted.get(this);
+            },
+        });
+    };
+
+    // An OfflineAudioContext renders to a buffer, not to the speakers, so it is
+    // silent already and is left alone — muting it would zero a result a check
+    // may one day want to read.
+    mute(window.AudioContext);
+    mute(window.webkitAudioContext);
+}
+
 // ─── Checks ──────────────────────────────────────────────────────────────────
 // One entry per claim. Kept inline while the app is small; when this list
 // outgrows the file, split to scripts/checks/ along component lines — the same
@@ -536,6 +588,7 @@ const checks = [
             const ios = await browser.newPage();
             try {
                 await ios.addInitScript(installAudioSpy);
+                await ios.addInitScript(silenceOutput);
                 await ios.addInitScript(() => {
                     window.webkitAudioContext = window.AudioContext;
                     delete window.AudioContext;
@@ -1101,6 +1154,43 @@ const checks = [
             await page.mouse.up(); // tidy up the still-down mouse button
         },
     },
+    {
+        name: 'the build number on screen is the one in the source',
+        async run(page) {
+            // The tag exists to tell a stale CDN copy from a fresh one, so the
+            // only failure that matters is the page showing something other
+            // than what the repo says — a hardcoded string in the markup, or a
+            // module that silently failed to load, would both look fine by eye.
+            const shown = await page.textContent('#version-tag');
+            const source = await page.evaluate(async () => {
+                const mod = await import('/js/version.js?cachebust=' + Date.now());
+                return mod.VERSION;
+            });
+            if (shown !== source) {
+                throw new Error(`tag shows "${shown}", js/version.js says "${source}"`);
+            }
+            if (!/^b\d+$/.test(source)) {
+                throw new Error(`build number should be b<digits>, got "${source}"`);
+            }
+        },
+    },
+    {
+        name: 'the build number does not sit on anything clickable',
+        async run(page) {
+            // It is fixed over the page, so it overlaps whatever scrolls under
+            // it. `pointer-events: none` is the thing under test: the element
+            // under that point must never be the tag itself.
+            const box = await page.$eval('#version-tag', (el) => {
+                const r = el.getBoundingClientRect();
+                return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+            });
+            const hit = await page.evaluate(
+                ({ x, y }) => document.elementFromPoint(x, y)?.id ?? '',
+                box,
+            );
+            if (hit === 'version-tag') throw new Error('the build tag is swallowing clicks');
+        },
+    },
 ];
 
 // ─── Check helpers ───────────────────────────────────────────────────────────
@@ -1214,6 +1304,7 @@ async function runChecks(browser, engine) {
     page.on('requestfailed', (r) => failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`));
 
     await page.addInitScript(installAudioSpy);
+    await page.addInitScript(silenceOutput);
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
 
     for (const check of checks) {

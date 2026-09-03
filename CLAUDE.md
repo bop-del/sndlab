@@ -103,6 +103,21 @@ Two things the run deliberately does not do, so they stay yours:
 Adding a feature means adding its checks to `scripts/verify.mjs`. Dev tooling
 lives under `scripts/`; shipped code stays dependency-free (ADR 0004).
 
+## The build number
+
+`js/version.js` holds one string — `b30`, `b31`, … — shown in the top-right
+corner of the page. It exists to answer one question after a push: *is the tab
+I am looking at the change I just made, or a stale copy?* Pages takes 1–3
+minutes, and without it the only way to tell is to guess.
+
+**Bump it by one in every commit that changes shipped code** (`index.html`,
+`css/`, `js/`) — same commit, not a follow-up. Docs-only and `scripts/`-only
+commits leave it alone: the number tracks what is deployed, and a bump that
+changes nothing on screen makes it useless for the one job it has.
+
+No hook enforces this. A hook would have to run a build to be reliable, and
+there is no build (rule 2).
+
 ## Deploy
 
 Push to `main` → GitHub Pages (branch deploy from `/`). No manual step, no
