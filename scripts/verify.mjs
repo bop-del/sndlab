@@ -168,6 +168,105 @@ function installAudioSpy() {
 
 const checks = [
     {
+        name: 'the pads are labelled for the selected scale',
+        async run(page) {
+            await page.selectOption('#root', '60');
+            await page.selectOption('#scale', 'phrygian');
+            // The row of labels is itself the lesson: case carries the quality,
+            // so the row is a picture of the scale's shape.
+            const phrygian = await page.$$eval('.pad', (ps) => ps.map((p) => p.textContent));
+            if (phrygian.join(' ') !== 'i II III iv v° VI vii') {
+                throw new Error(`Phrygian mislabelled: ${phrygian.join(' ')}`);
+            }
+            await page.selectOption('#scale', 'natural-minor');
+            const minor = await page.$$eval('.pad', (ps) => ps.map((p) => p.textContent));
+            if (minor.join(' ') !== 'i ii° III iv v VI VII') {
+                throw new Error(`natural minor mislabelled: ${minor.join(' ')}`);
+            }
+            await page.selectOption('#scale', 'phrygian');
+        },
+    },
+    {
+        name: 'a pad sounds its three notes',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('.pad[data-degree="0"]');
+            const voices = voicesIn(await audioSpy(page));
+            if (voices.length !== 3) throw new Error(`expected a triad, got ${voices.length} voices`);
+            await page.click('.pad[data-degree="0"]');
+        },
+    },
+    {
+        name: 'pads latch, and a second pad releases the first',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('.pad[data-degree="0"]');
+            // Latching is the point: both hands stay free for a melody, so the
+            // chord must still sound after the click is over.
+            let sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 3) throw new Error(`chord did not latch: ${sounding.length} voices`);
+
+            await page.click('.pad[data-degree="3"]');
+            sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            // Two triads at once is mud, and mud hides the interval this tool
+            // exists to make audible.
+            if (sounding.length !== 3) throw new Error(`expected one chord at a time, ${sounding.length} sounding`);
+
+            await page.click('.pad[data-degree="3"]');
+            sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 0) throw new Error(`pressing the lit pad did not stop it: ${sounding.length}`);
+        },
+    },
+    {
+        name: 'the drone holds the root until stopped',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('#drone');
+            let sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 1) throw new Error(`expected one droning note, got ${sounding.length}`);
+
+            await page.click('#drone');
+            sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 0) throw new Error('the drone did not stop');
+        },
+    },
+    {
+        name: 'a chord, the drone and a played note sound together',
+        async run(page) {
+            // Three sources holding notes at once, none stealing another's
+            // release. This is the tool working: hold the drone, press a chord,
+            // play a melody over it.
+            await resetSpy(page);
+            await page.click('#drone');
+            await page.click('.pad[data-degree="1"]'); // II — carries the flat second
+            await press(page, '[data-note="72"]');
+
+            const sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 5) throw new Error(`expected drone + triad + melody = 5, got ${sounding.length}`);
+
+            await release(page);
+            await page.click('.pad[data-degree="1"]');
+            await page.click('#drone');
+        },
+    },
+    {
+        name: 'switching scale strands neither a latched chord nor the drone',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('.pad[data-degree="0"]');
+            await page.click('#drone');
+            await page.selectOption('#scale', 'natural-minor');
+
+            // A chord built from a scale you have left is a chord from nowhere.
+            const sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 0) throw new Error(`${sounding.length} voices survived the scale change`);
+            const lit = await page.$$eval('.pad--on, .drone--on', (els) => els.length);
+            if (lit !== 0) throw new Error(`${lit} controls still claim to be on`);
+
+            await page.selectOption('#scale', 'phrygian');
+        },
+    },
+    {
         name: 'a preset stacks several oscillators per note',
         async run(page) {
             // One oscillator is a test tone. Detuned copies beating against
