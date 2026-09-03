@@ -69,13 +69,13 @@ h1 {
     justify-content: flex-start;
 
     /* The range, the floor, and the ceiling. --white-keys is how many white
-       keys C2–C6 has, which is what a white key is one share of. --key-min is
+       keys C2–C7 has, which is what a white key is one share of. --key-min is
        the narrowest a white key may get before the keyboard scrolls instead,
        because below roughly this a key is too small to hit and shrinking
        further trades one unusable keyboard for another. --key-max stops it
        growing into a slab on a wide monitor: past about this, a wider key is
        not a better one, it is just a bigger picture of a key. */
-    --white-keys: 29;
+    --white-keys: 36;
     --key-min: 15px;
     --key-max: 34px;
 }
@@ -85,7 +85,7 @@ h1 {
    placement hold at any width. Its own width is what a white key is a fraction
    of, so key size is decided here and nowhere else.
 
-   The two limits: `min-width` is the floor — the row stops shrinking at 29
+   The two limits: `min-width` is the floor — the row stops shrinking at 36
    minimum-width keys and the keyboard scrolls from there — and `max-width` the
    ceiling, past which it centres instead of growing. */
 .keyboard__keys {
@@ -114,7 +114,7 @@ h1 {
        the black keys position themselves. */
     position: relative;
     /* An equal share of the row, whatever the row's width is. `flex-basis: 0`
-       rather than a width, so 29 keys divide the row exactly and no rounding
+       rather than a width, so 36 keys divide the row exactly and no rounding
        leaves a sliver at the end. `min-width: 0` lets them shrink below their
        content box; the row's own min-width is where shrinking actually stops. */
     flex: 1 1 0;
@@ -277,6 +277,44 @@ h1 {
 
 .sound-controls select:focus-visible,
 .control input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* ── Transpose ────────────────────────────────────────────────────────────── */
+
+/* Where the typing rows start. Three buttons, one latched — the same idiom as
+   a latched chord pad, because that is what the app already means by "this one
+   is on", and reusing it costs nothing to learn. Smaller than a pad: it is set
+   between phrases rather than played on the beat. */
+.transpose {
+    display: flex;
+    gap: .3rem;
+    justify-content: center;
+    margin-bottom: .8rem;
+}
+
+.transpose__button {
+    font: inherit;
+    font-size: .85rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 2.9rem;
+    padding: .35rem .5rem;
+    color: var(--fg);
+    background: #23232e;
+    border: 1px solid #33333f;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.transpose__button:hover { background: #2b2b38; }
+.transpose__button--on {
+    color: var(--bg);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.transpose__button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }

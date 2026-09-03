@@ -376,11 +376,15 @@ const checks = [
     {
         name: 'a chord pad lights the keys it plays',
         async run(page) {
-            // The bug this ticket exists for. Chords sound two octaves below
-            // the keyboard's lowest key, so every note a pad played fell off
-            // the range, lit nothing, and raised nothing — the pad's own
-            // highlight was checked, the keyboard's was not, and a total
-            // failure shipped in silence.
+            // The bug the keyboard extension exists for. Chords used to sound
+            // two octaves below the keyboard's lowest key, so every note a pad
+            // played fell off the range, lit nothing, and raised nothing — the
+            // pad's own highlight was checked, the keyboard's was not, and a
+            // total failure shipped in silence.
+            //
+            // The register is now one octave below where the typing rows start
+            // rather than a fixed two below middle C, so it follows the
+            // transpose. At the default C4 position that is the C3 octave.
             await page.selectOption('#root', '60');
             await page.selectOption('#scale', 'phrygian');
             await page.click('.pad[data-degree="0"]');
@@ -390,9 +394,8 @@ const checks = [
             // then fails on those rather than on its own subject — a cascade
             // that hides the real failure behind a misleading one.
             try {
-                // C phrygian i: C, E flat, G — two octaves down from the pad's
-                // own register, which is where the keyboard now reaches.
-                const expected = [36, 39, 43];
+                // C phrygian i: C, E flat, G, in the octave below the rows.
+                const expected = [48, 51, 55];
                 for (const note of expected) {
                     if (!(await isLit(page, note))) throw new Error(`the pad plays MIDI ${note} but that key is not lit`);
                 }
@@ -417,7 +420,7 @@ const checks = [
             await page.click('#drone');
             try {
                 const lit = await litNotes(page);
-                if (String(lit) !== String([36])) throw new Error(`expected the root C2 lit, got [${lit}]`);
+                if (String(lit) !== String([48])) throw new Error(`expected the root C3 lit, got [${lit}]`);
             } finally {
                 await page.click('#drone');
             }
@@ -608,7 +611,7 @@ const checks = [
             try {
                 await fresh.goto(`http://localhost:${PORT}/`, { waitUntil: 'load' });
                 const keys = await fresh.$$eval('#keyboard .key', (els) => els.length);
-                if (keys !== 49) throw new Error(`expected 49 keys immediately after load, got ${keys}`);
+                if (keys !== 61) throw new Error(`expected 61 keys immediately after load, got ${keys}`);
             } finally {
                 await fresh.close();
             }
@@ -628,9 +631,7 @@ const checks = [
                 });
                 await ios.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
 
-                const box = await (await ios.$('[data-note="69"]')).boundingBox();
-                await ios.mouse.move(box.x + box.width / 2, box.y + box.height - 8);
-                await ios.mouse.down();
+                await press(ios, '[data-note="69"]');
 
                 const spy = await ios.evaluate(() => window.audioSpy);
                 const voices = voicesIn(spy);
@@ -701,24 +702,25 @@ const checks = [
         },
     },
     {
-        name: 'the keyboard renders four octaves of keys',
+        name: 'the keyboard renders five octaves of keys',
         async run(page) {
             // A dead listener is the classic no-build failure: the module 404s
             // and nothing renders. An empty container catches that.
             const keys = await page.$$('#keyboard .key');
-            if (keys.length !== 49) throw new Error(`expected 49 keys (C2 to C6), got ${keys.length}`);
+            if (keys.length !== 61) throw new Error(`expected 61 keys (C2 to C7), got ${keys.length}`);
             const white = await page.$$('#keyboard .key--white');
             const black = await page.$$('#keyboard .key--black');
-            if (white.length !== 29) throw new Error(`expected 29 white keys, got ${white.length}`);
-            if (black.length !== 20) throw new Error(`expected 20 black keys, got ${black.length}`);
+            if (white.length !== 36) throw new Error(`expected 36 white keys, got ${white.length}`);
+            if (black.length !== 25) throw new Error(`expected 25 black keys, got ${black.length}`);
 
-            // The ends are the range: chords reach down to C2, and the played
-            // octaves run up to C6.
+            // The ends are the range: chords reach down to C2, and the top
+            // transpose position puts the upper row's last key just under C7.
             const notes = await page.$$eval('#keyboard .key', (els) => els.map((el) => Number(el.dataset.note)));
             if (Math.min(...notes) !== 36) throw new Error(`the lowest key is MIDI ${Math.min(...notes)}, expected 36 (C2)`);
-            if (Math.max(...notes) !== 84) throw new Error(`the highest key is MIDI ${Math.max(...notes)}, expected 84 (C6)`);
+            if (Math.max(...notes) !== 96) throw new Error(`the highest key is MIDI ${Math.max(...notes)}, expected 96 (C7)`);
 
-            // The hairline marks where the typing rows begin — one key, C4.
+            // The hairline marks where the typing rows begin — one key, C4 by
+            // default.
             const marked = await page.$$eval('#keyboard .key--typing-start', (els) => els.map((el) => Number(el.dataset.note)));
             if (String(marked) !== String([60])) throw new Error(`expected the hairline on C4 alone, got [${marked}]`);
         },
@@ -1195,6 +1197,271 @@ const checks = [
         },
     },
     {
+        name: 'the transpose offers three octaves, with C4 latched by default',
+        async run(page) {
+            const labels = await page.$$eval('.transpose__button', (els) => els.map((el) => el.dataset.octave));
+            if (String(labels) !== String(['C3', 'C4', 'C5'])) {
+                throw new Error(`expected C3, C4, C5, got [${labels}]`);
+            }
+            const pressed = await page.$$eval(
+                '.transpose__button',
+                (els) => els.filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.dataset.octave),
+            );
+            // Exactly one, and the one that keeps today's behaviour.
+            if (String(pressed) !== String(['C4'])) {
+                throw new Error(`expected C4 alone latched, got [${pressed}]`);
+            }
+        },
+    },
+    {
+        name: 'transposing moves the typing rows',
+        async run(page) {
+            // The same physical key, a different octave. Asserted by frequency,
+            // which is how the suite already proves pitch.
+            try {
+                await resetSpy(page);
+                await page.keyboard.down('z');
+                const before = voicesIn(await audioSpy(page));
+                if (Math.abs(before[0].frequency - 262) > 1) {
+                    throw new Error(`expected C4 (~262 Hz) at the default position, got ${before[0].frequency}`);
+                }
+                await page.keyboard.up('z');
+
+                await page.click('.transpose__button[data-octave="C3"]');
+                await resetSpy(page);
+                await page.keyboard.down('z');
+                const after = voicesIn(await audioSpy(page));
+                if (Math.abs(after[0].frequency - 131) > 1) {
+                    throw new Error(`expected C3 (~131 Hz) after transposing down, got ${after[0].frequency}`);
+                }
+                if (!(await isLit(page, 48))) throw new Error('the C3 key is not the one lit');
+                await page.keyboard.up('z');
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'the comma and period keys transpose, and clamp at both ends',
+        async run(page) {
+            const latched = () => page.$$eval(
+                '.transpose__button',
+                (els) => els.filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.dataset.octave)[0],
+            );
+            try {
+                // Bound by physical position, like the note rows: dispatch the
+                // code carrying a character another layout would produce.
+                const send = (code) => page.evaluate(
+                    (c) => window.dispatchEvent(new KeyboardEvent('keydown', { code: c, key: 'x', bubbles: true })),
+                    code,
+                );
+
+                await send('Comma');
+                if (await latched() !== 'C3') throw new Error(`"," did not transpose down, latched ${await latched()}`);
+
+                // Clamped, not wrapped: down at the bottom is a no-op, and
+                // wrapping would throw the player two octaves the other way.
+                await send('Comma');
+                if (await latched() !== 'C3') throw new Error(`"," wrapped past the bottom to ${await latched()}`);
+
+                await send('Period');
+                await send('Period');
+                if (await latched() !== 'C5') throw new Error(`"." did not reach the top, latched ${await latched()}`);
+                await send('Period');
+                if (await latched() !== 'C5') throw new Error(`"." wrapped past the top to ${await latched()}`);
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'the pads and the drone follow the transpose, one octave below the rows',
+        async run(page) {
+            try {
+                await page.selectOption('#root', '60');
+                await page.selectOption('#scale', 'phrygian');
+
+                // Default position: the rows start at C4, so harmony sits in C3.
+                await resetSpy(page);
+                await page.click('#drone');
+                let sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+                if (Math.abs(sounding[0].frequency - 131) > 1) {
+                    throw new Error(`expected the drone on C3 (~131 Hz), got ${sounding[0].frequency}`);
+                }
+                await page.click('#drone');
+
+                // Move the rows up; harmony moves with them.
+                await page.click('.transpose__button[data-octave="C5"]');
+                await resetSpy(page);
+                await page.click('#drone');
+                sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+                if (Math.abs(sounding[0].frequency - 262) > 1) {
+                    throw new Error(`expected the drone to follow to C4 (~262 Hz), got ${sounding[0].frequency}`);
+                }
+                await page.click('#drone');
+
+                // And the pads with it: C phrygian i, an octave below the rows.
+                await page.click('.pad[data-degree="0"]');
+                const lit = await litNotes(page);
+                if (String(lit) !== String([60, 63, 67])) {
+                    throw new Error(`expected the triad at [60,63,67], got [${lit}]`);
+                }
+                await page.click('.pad[data-degree="0"]');
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'transposing strands neither a latched chord nor the drone',
+        async run(page) {
+            // The direct parallel of the existing check for switching root, and
+            // for the same reason: both stops release notes worked out from the
+            // current register, so moving the value first would release notes
+            // that were never pressed and leave the sounding ones held for ever.
+            try {
+                await page.click('.pad[data-degree="0"]');
+                await page.click('#drone');
+                if ((await litNotes(page)).length === 0) throw new Error('nothing was sounding to strand');
+
+                await page.click('.transpose__button[data-octave="C5"]');
+
+                const lit = await litNotes(page);
+                if (lit.length !== 0) throw new Error(`transposing left [${lit}] lit`);
+                const sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+                if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) still sounding after transpose`);
+
+                // And the buttons stop claiming to hold what they no longer do.
+                const on = await page.$$('.pad--on, .drone--on');
+                if (on.length !== 0) throw new Error(`${on.length} control(s) still lit after transpose`);
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'a key held through a transpose finishes at the pitch it started',
+        async run(page) {
+            // What the per-key ownership in #20 was the prefactor for. The
+            // mapping moves under a held key; the keyup must release what the
+            // keydown actually started, not what the mapping says by then.
+            try {
+                await resetSpy(page);
+                await page.keyboard.down('z'); // C4
+                if (!(await isLit(page, 60))) throw new Error('the note did not start at C4');
+
+                await page.click('.transpose__button[data-octave="C5"]');
+
+                // Still sounding, still at its original pitch: a transpose
+                // mid-phrase must not cut the phrase.
+                if (!(await isLit(page, 60))) throw new Error('transposing cut the held note');
+                let sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+                if (sounding.length !== 1) throw new Error(`expected the held note to survive, got ${sounding.length}`);
+                if (Math.abs(sounding[0].frequency - 262) > 1) {
+                    throw new Error(`the held note changed pitch to ${sounding[0].frequency}`);
+                }
+
+                // Releasing it stops that note and strands nothing.
+                await page.keyboard.up('z');
+                if (await isLit(page, 60)) throw new Error('the held note did not stop when released');
+                sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+                if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) stranded after release`);
+
+                // And the next press of that key is in the new octave.
+                await resetSpy(page);
+                await page.keyboard.down('z');
+                const next = voicesIn(await audioSpy(page));
+                if (Math.abs(next[0].frequency - 523) > 1) {
+                    throw new Error(`the next press should sound C5 (~523 Hz), got ${next[0].frequency}`);
+                }
+                await page.keyboard.up('z');
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'the hairline moves to the transpose position',
+        async run(page) {
+            try {
+                for (const [octave, note] of [['C3', 48], ['C5', 72], ['C4', 60]]) {
+                    await page.click(`.transpose__button[data-octave="${octave}"]`);
+                    const marked = await page.$$eval(
+                        '#keyboard .key--typing-start',
+                        (els) => els.map((el) => Number(el.dataset.note)),
+                    );
+                    if (String(marked) !== String([note])) {
+                        throw new Error(`at ${octave} expected the hairline on MIDI ${note} alone, got [${marked}]`);
+                    }
+                }
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'every note the rows can reach is on the keyboard, at every position',
+        async run(page) {
+            // The range exists to hold the rows at all three positions. A note
+            // the player can type but cannot see light up is the failure.
+            const notes = await page.$$eval('#keyboard .key', (els) => els.map((el) => Number(el.dataset.note)));
+            const lowest = Math.min(...notes);
+            const highest = Math.max(...notes);
+            for (const start of [48, 60, 72]) {
+                // Two rows: the lower starts at the position, the upper an
+                // octave above, twelve keys each.
+                const rowLowest = start;
+                const rowHighest = start + 12 + 11;
+                if (rowLowest < lowest) throw new Error(`at C${start / 12 - 1} the rows reach MIDI ${rowLowest}, below the keyboard's ${lowest}`);
+                if (rowHighest > highest) throw new Error(`at C${start / 12 - 1} the rows reach MIDI ${rowHighest}, above the keyboard's ${highest}`);
+            }
+        },
+    },
+    {
+        name: 'transposing leaves the root, the scale and the highlighting alone',
+        async run(page) {
+            // Moving octave is not secretly a key change.
+            try {
+                await page.selectOption('#root', '60');
+                await page.selectOption('#scale', 'phrygian');
+                const before = await page.$$eval('#keyboard .key--in-scale', (els) => els.map((el) => el.dataset.note));
+
+                await page.click('.transpose__button[data-octave="C3"]');
+
+                const root = await page.$eval('#root', (el) => el.value);
+                const scale = await page.$eval('#scale', (el) => el.value);
+                if (root !== '60') throw new Error(`the root changed to ${root}`);
+                if (scale !== 'phrygian') throw new Error(`the scale changed to ${scale}`);
+
+                const after = await page.$$eval('#keyboard .key--in-scale', (els) => els.map((el) => el.dataset.note));
+                if (String(before) !== String(after)) {
+                    throw new Error('the scale highlighting moved with the transpose');
+                }
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'a clicked key sounds its own pitch whatever the transpose',
+        async run(page) {
+            // The on-screen keyboard stays a literal picture of what it plays:
+            // the transpose moves the typing rows, not the keys.
+            try {
+                await page.click('.transpose__button[data-octave="C5"]');
+                await resetSpy(page);
+                await press(page, '[data-note="69"]');
+                const voices = voicesIn(await audioSpy(page));
+                if (Math.abs(voices[0].frequency - 440) > 0.5) {
+                    throw new Error(`the A4 key should still sound 440 Hz, got ${voices[0].frequency}`);
+                }
+                await release(page);
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
         name: 'two row keys held together release independently',
         async run(page) {
             // Both rows used to press every note under one shared owner token,
@@ -1358,9 +1625,22 @@ async function resetSpy(page) {
 
 // Pointer down and up are separate: holding is the thing under test, so no
 // check may use click(), which does both.
+//
+// The key is scrolled into view before its box is measured. mouse.move() takes
+// viewport coordinates and does no scrolling of its own, so a key below the
+// fold was pressed at a point that is not on it — the press landed on nothing,
+// the note never sounded, and the check failed claiming the audio was broken.
+// The page grew past a 720px window when the transpose row was added, which is
+// how this surfaced; it was always a latent fragility in the helper.
 async function press(page, selector) {
-    const box = await (await page.$(selector)).boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height - 8);
+    const key = await page.$(selector);
+    await key.scrollIntoViewIfNeeded();
+    const box = await key.boundingBox();
+    // The lower part of the key, which is the white key's exposed area — a
+    // click in the upper half of a white key can land on the black key
+    // overlapping it. Not the very bottom edge: a rounded corner there is
+    // outside the element.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.85);
     await page.mouse.down();
 }
 
@@ -1429,8 +1709,8 @@ function assertKeyboardGeometry(layout) {
     }
     groups.push(run);
 
-    // Four octaves from C: 2,3 four times — the final C adds no black key.
-    const expected = [2, 3, 2, 3, 2, 3, 2, 3];
+    // Five octaves from C: 2,3 five times — the final C adds no black key.
+    const expected = [2, 3, 2, 3, 2, 3, 2, 3, 2, 3];
     if (String(groups) !== String(expected)) {
         throw new Error(`black keys group as [${groups}], expected [${expected}]`);
     }

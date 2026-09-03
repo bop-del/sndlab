@@ -16,15 +16,30 @@ import { chordsIn } from '../theory/Scales.js';
 // own — the darkness is entirely in the relationship to the root. Something has
 // to hold the root for that relationship to exist.
 
-// Two octaves below the keyboard, so a chord and a melody do not collide.
-const CHORD_OCTAVE = -24;
-const DRONE_OCTAVE = -24;
+// One octave below where the typing rows start, so a chord is a floor heard
+// under the hands rather than a distant rumble, and harmony stays below melody
+// wherever the player puts the rows.
+//
+// This used to be a fixed two octaves below middle C. Following the transpose
+// is what keeps the relationship rather than the absolute pitch — and at the
+// default position it sounds an octave higher than it used to. That is a
+// deliberate change: C2 triads are muddy in their own right.
+const BELOW_ROWS = -12;
+
+// The octave the scale picker names its roots in — MIDI 60 to 71. The register
+// offset is measured from here, so the pads move with the transpose and not
+// with the root.
+const PICKER_OCTAVE = 60;
 
 export const ChordPads = {
     root: 60,
     scale: null,
     chords: [],
     pads: new Map(), // degree index → element
+
+    // Where the typing rows start. The pad and drone register is derived from
+    // it, so both follow the transpose.
+    typingFirst: 60,
 
     // Which pad is latched. One at a time: two triads at once is mud, and mud
     // hides the interval this exists to make audible.
@@ -33,6 +48,30 @@ export const ChordPads = {
 
     init(container) {
         this.container = container;
+    },
+
+    // The offset from the scale's own notes down to the register the pads and
+    // the drone actually sound in.
+    //
+    // chordsIn() builds triads from the root the picker selected, which sits in
+    // the octave above middle C; the offset carries them down to one octave
+    // below the typing rows. Measured from that root rather than from an
+    // absolute pitch, so moving the root transposes the chord and moving the
+    // transpose moves the register, and the two do not fight.
+    get register() {
+        return this.typingFirst + BELOW_ROWS - PICKER_OCTAVE;
+    },
+
+    // Move the harmony register with the rows.
+    //
+    // Stop first, then move — the same order setScale() uses, and for the same
+    // reason: both stops release notes worked out from the *current* register,
+    // so storing the new one first would release notes that were never pressed
+    // and leave the sounding ones held for ever.
+    setTranspose(typingFirst) {
+        this.stopChord();
+        this.stopDrone();
+        this.typingFirst = typingFirst;
     },
 
     setScale(root, scale) {
@@ -89,7 +128,7 @@ export const ChordPads = {
         if (wasActive) return; // latched pads toggle off
 
         const chord = this.chords[degreeIndex];
-        for (const note of chord.notes) Notes.press(note + CHORD_OCTAVE, `pad:${degreeIndex}`);
+        for (const note of chord.notes) Notes.press(note + this.register, `pad:${degreeIndex}`);
         this.active = degreeIndex;
         this.pads.get(degreeIndex)?.classList.add('pad--on');
         this.pads.get(degreeIndex)?.setAttribute('aria-pressed', 'true');
@@ -98,7 +137,7 @@ export const ChordPads = {
     stopChord() {
         if (this.active === null) return;
         const chord = this.chords[this.active];
-        for (const note of chord.notes) Notes.release(note + CHORD_OCTAVE, `pad:${this.active}`);
+        for (const note of chord.notes) Notes.release(note + this.register, `pad:${this.active}`);
         this.pads.get(this.active)?.classList.remove('pad--on');
         this.pads.get(this.active)?.setAttribute('aria-pressed', 'false');
         this.active = null;
@@ -106,7 +145,7 @@ export const ChordPads = {
 
     toggleDrone() {
         if (this.droning) return this.stopDrone();
-        Notes.press(this.root + DRONE_OCTAVE, 'drone');
+        Notes.press(this.root + this.register, 'drone');
         this.droning = true;
         this.drone.classList.add('drone--on');
         this.drone.setAttribute('aria-pressed', 'true');
@@ -114,7 +153,7 @@ export const ChordPads = {
 
     stopDrone() {
         if (!this.droning) return;
-        Notes.release(this.root + DRONE_OCTAVE, 'drone');
+        Notes.release(this.root + this.register, 'drone');
         this.droning = false;
         this.drone.classList.remove('drone--on');
         this.drone.setAttribute('aria-pressed', 'false');

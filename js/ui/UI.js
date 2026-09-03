@@ -3,6 +3,7 @@ import { ChordPads } from './ChordPads.js';
 import { Keyboard } from './Keyboard.js';
 import { ScalePicker } from './ScalePicker.js';
 import { SoundControls } from './SoundControls.js';
+import { Transpose } from './Transpose.js';
 import { VersionTag } from './VersionTag.js';
 
 // Composition root: find the mount points, hand them to the components, and
@@ -17,6 +18,15 @@ export const UI = {
             ChordPads.setScale(root, scale);
         });
         ScalePicker.init(document.getElementById('scale-picker'));
+
+        // The transpose moves the typing rows and the harmony register under
+        // them. Order matters: the pads stop what they are holding *before*
+        // the value moves, which their own setTranspose() does.
+        Transpose.onChange((typingFirst) => {
+            ChordPads.setTranspose(typingFirst);
+            Keyboard.setTranspose(typingFirst);
+        });
+        Transpose.init(document.getElementById('transpose'));
         SoundControls.init(document.getElementById('sound-controls'));
         VersionTag.init(document.getElementById('version-tag'));
 

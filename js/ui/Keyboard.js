@@ -1,16 +1,20 @@
 import { Notes } from '../audio/Notes.js';
 import { inScale } from '../theory/Scales.js';
 
-// Four octaves, C2 to C6. MIDI 60 is middle C, so the range starts two octaves
-// below it — which is where the chord pads and the drone sound. The upper half
-// is the played range; the lower half exists so a chord is visible as notes
-// rather than as a roman numeral, and so it can be clicked.
+// Five octaves, C2 to C7. MIDI 60 is middle C, so the range starts two octaves
+// below it — which is where the chord pads and the drone sound.
+//
+// The width is set by what the typing rows can reach: at the top transpose
+// position the upper row ends on B6, one key below the end, which is the same
+// one-key slack the four-octave version had at C4. That is what keeps every
+// reachable note on screen at all three positions. The keyboard is a fixed
+// window — it does not scroll or re-render when the transpose moves.
 const FIRST_NOTE = 36;
-const NOTE_COUNT = 49;
+const NOTE_COUNT = 61;
 
-// Where the computer-keyboard rows start playing. The rows keep C4–C6: nothing
-// needs to type a C2, and moving them would break muscle memory that works.
-const TYPING_FIRST_NOTE = 60;
+// Where the computer-keyboard rows start by default. The transpose moves this;
+// C4 is where it sits until something does.
+const DEFAULT_TYPING_FIRST_NOTE = 60;
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const isBlack = (midiNumber) => NOTE_NAMES[midiNumber % 12].includes('#');
@@ -35,15 +39,26 @@ const WHITE_COUNT = [...Array(NOTE_COUNT).keys()].filter((i) => !isBlack(FIRST_N
 const LOWER_ROW = ['KeyZ', 'KeyS', 'KeyX', 'KeyD', 'KeyC', 'KeyV', 'KeyG', 'KeyB', 'KeyH', 'KeyN', 'KeyJ', 'KeyM'];
 const UPPER_ROW = ['KeyQ', 'Digit2', 'KeyW', 'Digit3', 'KeyE', 'KeyR', 'Digit5', 'KeyT', 'Digit6', 'KeyY', 'Digit7', 'KeyU'];
 
-const KEY_TO_NOTE = new Map();
-for (const [i, code] of LOWER_ROW.entries()) KEY_TO_NOTE.set(code, TYPING_FIRST_NOTE + i);
-for (const [i, code] of UPPER_ROW.entries()) KEY_TO_NOTE.set(code, TYPING_FIRST_NOTE + 12 + i);
+// Rebuilt whenever the transpose moves, rather than being a module constant:
+// the rows are two octaves anchored to a value the player controls.
+function mappingFrom(typingFirst) {
+    const map = new Map();
+    for (const [i, code] of LOWER_ROW.entries()) map.set(code, typingFirst + i);
+    for (const [i, code] of UPPER_ROW.entries()) map.set(code, typingFirst + 12 + i);
+    return map;
+}
 
 // Note ownership lives in Notes: the keyboard is one source among several, and
 // the chord pads and drone hold notes on the same terms. What stays here is the
 // keyboard's own business — its keys, their lit state, and its two input paths.
 export const Keyboard = {
     keys: new Map(), // MIDI number → element
+
+    // Where the typing rows start, and the mapping that follows from it. Both
+    // move when the transpose does; a key already held keeps the note it
+    // pressed, because that was remembered at keydown (#20).
+    typingFirst: DEFAULT_TYPING_FIRST_NOTE,
+    keyToNote: mappingFrom(DEFAULT_TYPING_FIRST_NOTE),
 
     // What each input path grabbed, so a release stops the note that was
     // actually pressed. Resolving it again at release time is wrong: focus can
@@ -74,6 +89,22 @@ export const Keyboard = {
         window.addEventListener('blur', () => this.releaseAll());
     },
 
+    // Move the typing rows. The keyboard itself does not re-render: it is a
+    // fixed window wide enough for every position, so only the mapping and the
+    // hairline move.
+    //
+    // Notes already held are deliberately untouched. Each row key remembers the
+    // note it pressed (#20), so a key held across a transpose finishes at the
+    // pitch it started at and its release stops that note — the phrase is not
+    // cut, and nothing is stranded.
+    setTranspose(typingFirst) {
+        this.typingFirst = typingFirst;
+        this.keyToNote = mappingFrom(typingFirst);
+        for (const [midiNumber, key] of this.keys) {
+            key.classList.toggle('key--typing-start', midiNumber === typingFirst);
+        }
+    },
+
     // Mark which keys belong to the selected scale. Out-of-scale keys stay
     // playable — muting them would hide the very contrast being taught.
     showScale(root, scale) {
@@ -100,7 +131,7 @@ export const Keyboard = {
             // The hairline marks where the typing rows begin — a boundary in
             // what the computer keyboard reaches, not in what is playable:
             // every key below it still sounds when clicked.
-            const typingStart = midiNumber === TYPING_FIRST_NOTE ? ' key--typing-start' : '';
+            const typingStart = midiNumber === this.typingFirst ? ' key--typing-start' : '';
             key.className = `key ${black ? 'key--black' : 'key--white'}${typingStart}`;
             key.dataset.note = String(midiNumber);
             key.setAttribute('aria-label', `${name}${Math.floor(midiNumber / 12) - 1}`);
@@ -190,7 +221,7 @@ export const Keyboard = {
                 return;
             }
 
-            const midiNumber = KEY_TO_NOTE.get(event.code);
+            const midiNumber = this.keyToNote.get(event.code);
             if (midiNumber === undefined) return;
             event.preventDefault();
             if (this.rowNotes.has(event.code)) return; // auto-repeat
