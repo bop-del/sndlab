@@ -106,16 +106,32 @@ change — iterate locally, don't deploy to test.
 ## How work flows
 
 Issues are the backlog: `gh issue list`. The workflow runs on the Matt Pocock
-engineering skills (loaded via `cc-sndlab`):
+engineering skills (loaded via `cc-sndlab`). The main flow, idea → shipped:
 
 ```
-/grill-me      sharpen scope, settle decisions
-/to-tickets    plan → issues with blocking edges
-/triage        assess, label, write an agent brief
-/wayfinder     plan large efforts as a map issue
+/grill-with-docs   interview until the decisions are settled; writes ADRs
+                   and CONTEXT.md as it goes
+/to-spec           synthesise the conversation into a spec on the tracker
+/to-tickets        split it into tickets with blocking edges — skip it when
+                   the work is one coherent change
+/implement         build a ticket; drives /tdd, closes with /code-review
 ```
 
-See `docs/SETUP.md` for the one-time setup.
+Keep grilling, spec and tickets in **one context window** — the spec is the
+first thing that survives a compact. `/implement` then starts fresh per ticket.
+
+On-ramps onto that flow, not steps in it:
+
+```
+/triage            raw incoming issues → agent-ready. Not for tickets
+                   /to-tickets already produced.
+/diagnosing-bugs   a bug that resists a first look
+/wayfinder         an effort too big for one session, where the route is
+                   not yet visible. Hands off at /to-spec.
+/prototype         when a design question needs runnable code to answer
+```
+
+`/ask-matt` routes if you are unsure. See `docs/SETUP.md` for the one-time setup.
 
 ## Agent skills
 
