@@ -287,6 +287,87 @@ const checks = [
         },
     },
     {
+        name: 'a chord pad lights the keys it plays',
+        async run(page) {
+            // The bug this ticket exists for. Chords sound two octaves below
+            // the keyboard's lowest key, so every note a pad played fell off
+            // the range, lit nothing, and raised nothing — the pad's own
+            // highlight was checked, the keyboard's was not, and a total
+            // failure shipped in silence.
+            await page.selectOption('#root', '60');
+            await page.selectOption('#scale', 'phrygian');
+            await page.click('.pad[data-degree="0"]');
+
+            // Un-latch whatever happens. A throw between the click and the
+            // release leaves the pad holding three notes, and the next check
+            // then fails on those rather than on its own subject — a cascade
+            // that hides the real failure behind a misleading one.
+            try {
+                // C phrygian i: C, E flat, G — two octaves down from the pad's
+                // own register, which is where the keyboard now reaches.
+                const expected = [36, 39, 43];
+                for (const note of expected) {
+                    if (!(await isLit(page, note))) throw new Error(`the pad plays MIDI ${note} but that key is not lit`);
+                }
+                const lit = await litNotes(page);
+                if (String(lit) !== String(expected)) {
+                    throw new Error(`expected exactly [${expected}] lit, got [${lit}]`);
+                }
+            } finally {
+                await page.click('.pad[data-degree="0"]');
+            }
+
+            if ((await litNotes(page)).length !== 0) throw new Error('releasing the chord left keys lit');
+        },
+    },
+    {
+        name: 'the drone lights its root',
+        async run(page) {
+            // Set the root rather than inheriting it: an absolute MIDI number
+            // asserted against whatever the previous check left behind fails
+            // for reasons that have nothing to do with the drone.
+            await page.selectOption('#root', '60');
+            await page.click('#drone');
+            try {
+                const lit = await litNotes(page);
+                if (String(lit) !== String([36])) throw new Error(`expected the root C2 lit, got [${lit}]`);
+            } finally {
+                await page.click('#drone');
+            }
+            if ((await litNotes(page)).length !== 0) throw new Error('stopping the drone left the key lit');
+        },
+    },
+    {
+        name: 'changing scale or root clears the keys a chord had lit',
+        async run(page) {
+            // Each half asserts the keys were lit first: with the old two-octave
+            // keyboard nothing ever lit, so "nothing is lit afterwards" passed
+            // while saying nothing at all.
+            //
+            // The restore is in a finally: four assertions can throw above it,
+            // and a check that leaves the picker on another scale hands its
+            // world to every check after it — and to the screenshot, whose
+            // whole point is showing the app's default state.
+            try {
+                await page.selectOption('#root', '60');
+                await page.selectOption('#scale', 'phrygian');
+
+                await page.click('.pad[data-degree="0"]');
+                if ((await litNotes(page)).length === 0) throw new Error('the chord lit nothing to clear');
+                await page.selectOption('#scale', 'natural-minor');
+                if ((await litNotes(page)).length !== 0) throw new Error('the scale change left keys lit');
+
+                await page.click('.pad[data-degree="0"]');
+                if ((await litNotes(page)).length === 0) throw new Error('the chord lit nothing to clear');
+                await page.selectOption('#root', '62');
+                if ((await litNotes(page)).length !== 0) throw new Error('the root change left keys lit');
+            } finally {
+                await page.selectOption('#root', '60');
+                await page.selectOption('#scale', 'phrygian');
+            }
+        },
+    },
+    {
         name: 'a preset stacks several oscillators per note',
         async run(page) {
             // One oscillator is a test tone. Detuned copies beating against
@@ -440,7 +521,7 @@ const checks = [
             try {
                 await fresh.goto(`http://localhost:${PORT}/`, { waitUntil: 'load' });
                 const keys = await fresh.$$eval('#keyboard .key', (els) => els.length);
-                if (keys !== 25) throw new Error(`expected 25 keys immediately after load, got ${keys}`);
+                if (keys !== 49) throw new Error(`expected 49 keys immediately after load, got ${keys}`);
             } finally {
                 await fresh.close();
             }
@@ -534,16 +615,26 @@ const checks = [
         },
     },
     {
-        name: 'the keyboard renders two octaves of keys',
+        name: 'the keyboard renders four octaves of keys',
         async run(page) {
             // A dead listener is the classic no-build failure: the module 404s
             // and nothing renders. An empty container catches that.
             const keys = await page.$$('#keyboard .key');
-            if (keys.length !== 25) throw new Error(`expected 25 keys (C to C), got ${keys.length}`);
+            if (keys.length !== 49) throw new Error(`expected 49 keys (C2 to C6), got ${keys.length}`);
             const white = await page.$$('#keyboard .key--white');
             const black = await page.$$('#keyboard .key--black');
-            if (white.length !== 15) throw new Error(`expected 15 white keys, got ${white.length}`);
-            if (black.length !== 10) throw new Error(`expected 10 black keys, got ${black.length}`);
+            if (white.length !== 29) throw new Error(`expected 29 white keys, got ${white.length}`);
+            if (black.length !== 20) throw new Error(`expected 20 black keys, got ${black.length}`);
+
+            // The ends are the range: chords reach down to C2, and the played
+            // octaves run up to C6.
+            const notes = await page.$$eval('#keyboard .key', (els) => els.map((el) => Number(el.dataset.note)));
+            if (Math.min(...notes) !== 36) throw new Error(`the lowest key is MIDI ${Math.min(...notes)}, expected 36 (C2)`);
+            if (Math.max(...notes) !== 84) throw new Error(`the highest key is MIDI ${Math.max(...notes)}, expected 84 (C6)`);
+
+            // The hairline marks where the typing rows begin — one key, C4.
+            const marked = await page.$$eval('#keyboard .key--typing-start', (els) => els.map((el) => Number(el.dataset.note)));
+            if (String(marked) !== String([60])) throw new Error(`expected the hairline on C4 alone, got [${marked}]`);
         },
     },
     {
@@ -779,8 +870,8 @@ const checks = [
             }
             groups.push(run);
 
-            // Two octaves from C: 2,3 | 2,3 — the final C adds no black key.
-            const expected = [2, 3, 2, 3];
+            // Four octaves from C: 2,3 four times — the final C adds no black key.
+            const expected = [2, 3, 2, 3, 2, 3, 2, 3];
             if (String(groups) !== String(expected)) {
                 throw new Error(`black keys group as [${groups}], expected [${expected}]`);
             }
@@ -842,6 +933,77 @@ const checks = [
                 window.dispatchEvent(new KeyboardEvent('keyup', { key: 'y', code: 'KeyZ', bubbles: true }));
             });
             if (await isLit(page, 60)) throw new Error('the note did not release');
+        },
+    },
+    {
+        name: 'the typing rows still sound C4–C6, not the keyboard\'s new lowest note',
+        async run(page) {
+            // The rows are anchored to their own constant, not to the range's
+            // first note. Widening the keyboard down to C2 must not drag them
+            // with it: nothing needs to type a C2, and moving them would break
+            // muscle memory that already works.
+            await resetSpy(page);
+            await page.keyboard.down('z'); // first key of the lower row
+            const first = voicesIn(await audioSpy(page));
+            if (first.length !== 1) throw new Error(`expected 1 voice, got ${first.length}`);
+            if (Math.abs(first[0].frequency - 262) > 1) {
+                throw new Error(`the lower row should start at C4 (~262 Hz), got ${first[0].frequency}`);
+            }
+            if (!(await isLit(page, 60))) throw new Error('the C4 key is not the one lit');
+            await page.keyboard.up('z');
+
+            // And the top of the upper row is the top of the range.
+            await resetSpy(page);
+            await page.keyboard.down('u'); // last key of the upper row
+            if (!(await isLit(page, 83))) throw new Error('the top of the upper row is not B5');
+            await page.keyboard.up('u');
+        },
+    },
+    {
+        name: 'a narrow window does not push the page sideways',
+        async run(page) {
+            // Four octaves is wider than a phone, and the default 1280px
+            // viewport hides that from every other check — which is exactly how
+            // a layout defect ships. The keyboard must scroll inside its own
+            // box rather than dragging the heading and the pads off-screen.
+            const original = page.viewportSize();
+            try {
+                await page.setViewportSize({ width: 390, height: 800 });
+                const overflow = await page.evaluate(() => ({
+                    page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    keyboardScrolls: document.querySelector('.keyboard').scrollWidth
+                        > document.querySelector('.keyboard').clientWidth,
+                }));
+                if (overflow.page > 1) throw new Error(`the page scrolls sideways by ${overflow.page}px at 390px wide`);
+                if (!overflow.keyboardScrolls) throw new Error('the keyboard does not scroll inside its own box at 390px');
+
+                // And it still fits without scrolling where there is room.
+                await page.setViewportSize({ width: 1280, height: 800 });
+                const wide = await page.evaluate(() => {
+                    const k = document.querySelector('.keyboard');
+                    return k.scrollWidth - k.clientWidth;
+                });
+                if (wide > 1) throw new Error(`the keyboard scrolls at 1280px, where it should fit (${wide}px)`);
+            } finally {
+                await page.setViewportSize(original);
+            }
+        },
+    },
+    {
+        name: 'the chord register plays when clicked',
+        async run(page) {
+            // The lower octaves are a register, not a display. The typing rows
+            // do not reach them, so the mouse is the only way in — and if that
+            // stopped working they would be decoration.
+            await resetSpy(page);
+            await press(page, '[data-note="36"]'); // C2, the lowest key
+            const voices = voicesIn(await audioSpy(page));
+            if (voices.length !== 1) throw new Error(`expected the lowest key to sound, got ${voices.length} voices`);
+            if (Math.abs(voices[0].frequency - 65) > 1) {
+                throw new Error(`C2 should be ~65 Hz, got ${voices[0].frequency}`);
+            }
+            await release(page);
+            if (await isLit(page, 36)) throw new Error('the lowest key stayed lit after release');
         },
     },
     {
@@ -999,6 +1161,12 @@ async function isLit(page, midiNumber) {
     );
 }
 
+// Every lit key, ascending. Asserting the whole set rather than one key at a
+// time is what catches a chord lighting notes it does not play.
+async function litNotes(page) {
+    return page.$$eval('#keyboard .key--pressed', (els) => els.map((el) => Number(el.dataset.note)).sort((a, b) => a - b));
+}
+
 // ─── Run ─────────────────────────────────────────────────────────────────────
 // Every check runs against both engines. Chromium alone let a WebKit-only bug
 // ship: the engine constructed an unprefixed AudioContext, which does not exist
@@ -1084,10 +1252,17 @@ async function runChecks(browser, engine) {
 
         // The pressed state is where misalignment and an invisible active state
         // actually show, so the chord is the shot worth looking at hardest.
-        for (const key of ['z', 'c', 'b']) await page.keyboard.down(key);
+        // A pad and the drone, plus a melody note held by hand: this is the
+        // shot that shows both registers lit at once, which is the whole point
+        // of the four-octave range.
+        await page.click('.pad[data-degree="0"]');
+        await page.click('#drone');
+        for (const key of ['e', 'y']) await page.keyboard.down(key);
         const chord = join(SHOTS, 'app-chord.png');
         await page.screenshot({ path: chord, fullPage: true });
-        for (const key of ['z', 'c', 'b']) await page.keyboard.up(key);
+        for (const key of ['e', 'y']) await page.keyboard.up(key);
+        await page.click('#drone');
+        await page.click('.pad[data-degree="0"]');
 
         console.log(`\n  screenshots → ${idle.replace(ROOT, '')}, ${chord.replace(ROOT, '')}`);
         console.log('                (look at them — it is not verified until you have)');

@@ -1,16 +1,25 @@
 import { Notes } from '../audio/Notes.js';
 import { inScale } from '../theory/Scales.js';
 
-// Two octaves, C to C. MIDI 60 is middle C.
-const FIRST_NOTE = 60;
-const NOTE_COUNT = 25;
+// Four octaves, C2 to C6. MIDI 60 is middle C, so the range starts two octaves
+// below it — which is where the chord pads and the drone sound. The upper half
+// is the played range; the lower half exists so a chord is visible as notes
+// rather than as a roman numeral, and so it can be clicked.
+const FIRST_NOTE = 36;
+const NOTE_COUNT = 49;
+
+// Where the computer-keyboard rows start playing. The rows keep C4–C6: nothing
+// needs to type a C2, and moving them would break muscle memory that works.
+const TYPING_FIRST_NOTE = 60;
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const isBlack = (midiNumber) => NOTE_NAMES[midiNumber % 12].includes('#');
 
-// Kept in step with .key--white / .key--black in css/base.css.
-const WHITE_WIDTH = 44;
-const BLACK_WIDTH = 28;
+// Kept in step with .key--white / .key--black in css/base.css. Four octaves at
+// the old 44px ran off the window; issue #13 removes this duplication entirely
+// by sizing keys as a fraction of the container.
+const WHITE_WIDTH = 28;
+const BLACK_WIDTH = 18;
 
 // The Ableton computer-MIDI layout: two chromatic rows, no shared keys. The
 // ticket named `awsedftgyhuj` for the lower octave, but that collides with the
@@ -26,8 +35,8 @@ const LOWER_ROW = ['KeyZ', 'KeyS', 'KeyX', 'KeyD', 'KeyC', 'KeyV', 'KeyG', 'KeyB
 const UPPER_ROW = ['KeyQ', 'Digit2', 'KeyW', 'Digit3', 'KeyE', 'KeyR', 'Digit5', 'KeyT', 'Digit6', 'KeyY', 'Digit7', 'KeyU'];
 
 const KEY_TO_NOTE = new Map();
-for (const [i, code] of LOWER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + i);
-for (const [i, code] of UPPER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + 12 + i);
+for (const [i, code] of LOWER_ROW.entries()) KEY_TO_NOTE.set(code, TYPING_FIRST_NOTE + i);
+for (const [i, code] of UPPER_ROW.entries()) KEY_TO_NOTE.set(code, TYPING_FIRST_NOTE + 12 + i);
 
 // Note ownership lives in Notes: the keyboard is one source among several, and
 // the chord pads and drone hold notes on the same terms. What stays here is the
@@ -86,7 +95,11 @@ export const Keyboard = {
 
             const key = document.createElement('button');
             key.type = 'button';
-            key.className = `key ${black ? 'key--black' : 'key--white'}`;
+            // The hairline marks where the typing rows begin — a boundary in
+            // what the computer keyboard reaches, not in what is playable:
+            // every key below it still sounds when clicked.
+            const typingStart = midiNumber === TYPING_FIRST_NOTE ? ' key--typing-start' : '';
+            key.className = `key ${black ? 'key--black' : 'key--white'}${typingStart}`;
             key.dataset.note = String(midiNumber);
             key.setAttribute('aria-label', `${name}${Math.floor(midiNumber / 12) - 1}`);
 
