@@ -13,6 +13,80 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 The repo is `bop-del/sndlab`; `gh` infers it from `git remote -v` when run inside the clone.
 
+## The board
+
+Progress lives on a GitHub Project board, not in the issue's open/closed state.
+An issue only records *what* the work is; the board records *where it has got to*
+— which is what a fresh agent session needs in order to pick something up without
+duplicating work already in flight.
+
+**Why a board rather than more labels.** Labels were the cheaper option and were
+seriously considered. They lose on one point: a label cannot be *claimed*
+atomically before work starts, and the claim is the whole reason this exists. A
+second session must be able to see that the first is already building something.
+The board's Status field is a single place that answers that; two labels written
+by two sessions is a race.
+
+**Status is the pipeline; labels are the assessment.** They do not overlap, so
+they cannot disagree. See `triage-labels.md`.
+
+| Status | Meaning | Next action |
+|---|---|---|
+| **Needs decision** | Scope is not settled. No agent should build this. | `/grill-with-docs` |
+| **Ready** | Spec written. An agent can take it cold. | `/implement` |
+| **In progress** | Claimed by a session. Do not pick this up. | — |
+| **Needs review** | Built and the checks pass. Waiting on the parts an agent cannot judge: the sound, and the screenshot. | Boris |
+| **Done** | Verified and pushed. | — |
+
+### Rules
+
+- **Claim before starting.** Move to `In progress` as the session's *first write*,
+  before touching any code. A claim recorded at the end prevents nothing.
+- **Hand off honestly.** Move to `Needs review` when the verification run passes.
+  That is the agent saying "the assertions hold; the rest is yours."
+- **Only Boris moves anything to `Done`.** Done means a human heard it and looked
+  at the screenshot. An agent closing out its own work is the failure the
+  verification rule in `CLAUDE.md` exists to prevent.
+- **Every card is a real issue.** No draft items — a draft is a second source of
+  truth that `gh issue list` cannot see.
+- **A stale claim can be taken.** If a card sits in `In progress` with a clean
+  working tree and nothing pushed, the session that claimed it died. Take it.
+
+### Operations
+
+The board is project **2** under the `bop-del` **user** (not the repo) —
+<https://github.com/users/bop-del/projects/2>. It needs the `project` token
+scope; if a call 403s, run `gh auth refresh -h github.com -s project`.
+
+```bash
+# See the board — what is in flight, and what is free to take
+gh project item-list 2 --owner bop-del --format json
+
+# Add an issue
+gh project item-add 2 --owner bop-del --url https://github.com/bop-del/sndlab/issues/<n>
+
+# Move a card: find its item id in the list above, then
+gh project item-edit --id <item id> \
+  --project-id PVT_kwHODNi2i84BiUoh \
+  --field-id PVTSSF_lAHODNi2i84BiUohzhhNHDk \
+  --single-select-option-id <option id>
+```
+
+| Status | Option id |
+|---|---|
+| Needs decision | `a6332e64` |
+| Ready | `86f0d5b1` |
+| In progress | `5faec826` |
+| Needs review | `52c3e954` |
+| Done | `550dce74` |
+
+These ids are stable — use them directly rather than re-deriving them. If one is
+rejected the field was edited by hand; re-read it with
+`gh project field-list 2 --owner bop-del --format json` and fix this table.
+
+`gh` cannot change the *set* of options — that needs the GraphQL
+`updateProjectV2Field` mutation, which replaces all options at once.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

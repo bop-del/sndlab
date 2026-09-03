@@ -133,6 +133,27 @@ On-ramps onto that flow, not steps in it:
 
 `/ask-matt` routes if you are unsure. See `docs/SETUP.md` for the one-time setup.
 
+### The board
+
+Issues say *what*; the board says *where it has got to*. Sessions do not share
+memory, so the board is how one knows what another is already building.
+
+```
+Needs decision → Ready → In progress → Needs review → Done
+```
+
+Three rules, in order of how much damage breaking them does:
+
+1. **Claim before starting.** Move the card to `In progress` as your first write,
+   before any code. A claim made afterwards prevents nothing.
+2. **Only Boris moves a card to `Done`.** Done means a human heard it and looked
+   at the screenshot. Move finished work to `Needs review` and stop there.
+3. **Every card is a real issue** — no draft items.
+
+If a card sits in `In progress` with a clean tree and nothing pushed, that
+session died; the card is yours. Mechanics and `gh` commands:
+`docs/agents/issue-tracker.md`.
+
 ## Agent skills
 
 ### Issue tracker
