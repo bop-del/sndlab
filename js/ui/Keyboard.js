@@ -37,8 +37,13 @@ export const Keyboard = {
     // actually pressed. Resolving it again at release time is wrong: focus can
     // move mid-hold, and then the wrong note gets released and the real one
     // sticks.
-    pointerNote: null,
-    spaceNote: null,
+    //
+    // Both are keyed rather than single slots, because both can hold several
+    // notes at once: two fingers on a touchscreen, or Space and Enter together.
+    // A single slot loses the first press and strands its note, sounding, for
+    // good.
+    pointerNotes: new Map(), // pointerId → MIDI number
+    activationNotes: new Map(), // KeyboardEvent.code → MIDI number
 
     init(container) {
         this.render(container);
@@ -119,8 +124,8 @@ export const Keyboard = {
             this.release(midiNumber);
         }
         this.holders.clear();
-        this.pointerNote = null;
-        this.spaceNote = null;
+        this.pointerNotes.clear();
+        this.activationNotes.clear();
         AudioEngine.stopAll();
     },
 
@@ -134,8 +139,10 @@ export const Keyboard = {
             // replay the last key clicked. Tab still reaches the keys.
             event.preventDefault();
 
-            this.pointerNote = midiNumber;
-            this.press(midiNumber, 'pointer');
+            this.pointerNotes.set(event.pointerId, midiNumber);
+            // The owner token carries the pointer id, so two fingers on the
+            // same key are two holders and the first to lift does not stop it.
+            this.press(midiNumber, `pointer:${event.pointerId}`);
         });
 
         // Release from the document, not the key. A pointer dragged off the key
@@ -143,13 +150,14 @@ export const Keyboard = {
         // driving it in Playwright is the flakiest assertion of the set, and a
         // check that goes red spuriously is a check that gets ignored.
         //
-        // Only the pointer's own note is released: notes held on the computer
-        // keyboard must survive a mouse click elsewhere.
+        // Each pointer releases only the note it pressed: notes held on the
+        // computer keyboard, or under another finger, must survive.
         for (const type of ['pointerup', 'pointercancel']) {
-            document.addEventListener(type, () => {
-                if (this.pointerNote === null) return;
-                this.release(this.pointerNote, 'pointer');
-                this.pointerNote = null;
+            document.addEventListener(type, (event) => {
+                const midiNumber = this.pointerNotes.get(event.pointerId);
+                if (midiNumber === undefined) return;
+                this.pointerNotes.delete(event.pointerId);
+                this.release(midiNumber, `pointer:${event.pointerId}`);
             });
         }
     },
@@ -163,12 +171,12 @@ export const Keyboard = {
             // nothing when activated the standard way. The note is remembered
             // here, because focus may have moved by the time the keyup lands.
             if (isActivation(event)) {
-                if (this.spaceNote !== null) return; // auto-repeat
+                if (this.activationNotes.has(event.code)) return; // auto-repeat
                 const focused = noteOf(document.activeElement);
                 if (focused === null) return;
                 event.preventDefault();
-                this.spaceNote = focused;
-                this.press(focused, 'space');
+                this.activationNotes.set(event.code, focused);
+                this.press(focused, `key:${event.code}`);
                 return;
             }
 
@@ -182,9 +190,12 @@ export const Keyboard = {
 
         window.addEventListener('keyup', (event) => {
             if (isActivation(event)) {
-                if (this.spaceNote === null) return;
-                this.release(this.spaceNote, 'space');
-                this.spaceNote = null;
+                // Only the note this very key started: a stray Space keyup must
+                // not release what Enter is holding, and vice versa.
+                const midiNumber = this.activationNotes.get(event.code);
+                if (midiNumber === undefined) return;
+                this.activationNotes.delete(event.code);
+                this.release(midiNumber, `key:${event.code}`);
                 return;
             }
 

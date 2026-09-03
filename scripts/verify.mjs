@@ -323,6 +323,73 @@ const checks = [
         },
     },
     {
+        name: 'black keys fall into the 2–3 groups of a real keyboard',
+        async run(page) {
+            // Issue #4: the pitch mapping can be perfect while the thing does
+            // not read as a keyboard. No other check looks at position, so this
+            // regression would otherwise only ever be caught by eye.
+            const layout = await page.evaluate(() => {
+                const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+                const keys = [...document.querySelectorAll('#keyboard .key')].map((key) => ({
+                    note: Number(key.dataset.note),
+                    black: key.classList.contains('key--black'),
+                    left: key.getBoundingClientRect().left,
+                    right: key.getBoundingClientRect().right,
+                }));
+                const row = document.querySelector('.keyboard__keys').getBoundingClientRect();
+                return {
+                    row: { left: row.left, right: row.right },
+                    keys: keys.map((k) => ({ ...k, name: names[k.note % 12] })),
+                };
+            });
+
+            // 1. No black key on the E–F or B–C boundary — the gaps are what
+            //    make the groups legible.
+            for (const white of layout.keys.filter((k) => !k.black)) {
+                if (white.name !== 'E' && white.name !== 'B') continue;
+                const next = layout.keys.find((k) => k.note === white.note + 1);
+                if (next?.black) throw new Error(`a black key sits above ${white.name} — that gap must be empty`);
+            }
+
+            // 2. Each black key straddles the boundary between two white keys,
+            //    rather than floating over the middle of one.
+            const whites = layout.keys.filter((k) => !k.black);
+            for (const black of layout.keys.filter((k) => k.black)) {
+                const centre = (black.left + black.right) / 2;
+                const straddled = whites.some((w) => Math.abs(w.right - centre) < 1);
+                if (!straddled) throw new Error(`the black key at MIDI ${black.note} does not sit on a white-key boundary`);
+            }
+
+            // 3. The groups really are 2 then 3. DOM order is chromatic, so
+            //    black keys are never adjacent there — the grouping is a fact
+            //    about horizontal position. Walk them left to right and split
+            //    the run wherever the gap widens to a skipped white key.
+            const blacks = layout.keys.filter((k) => k.black).sort((a, b) => a.left - b.left);
+            const step = Math.min(...blacks.slice(1).map((k, i) => k.left - blacks[i].left));
+            const groups = [];
+            let run = 1;
+            for (let i = 1; i < blacks.length; i++) {
+                // A gap of one step means the next black key is the neighbour;
+                // anything wider is the E–F or B–C skip that ends a group.
+                if (blacks[i].left - blacks[i - 1].left < step * 1.5) run++;
+                else { groups.push(run); run = 1; }
+            }
+            groups.push(run);
+
+            // Two octaves from C: 2,3 | 2,3 — the final C adds no black key.
+            const expected = [2, 3, 2, 3];
+            if (String(groups) !== String(expected)) {
+                throw new Error(`black keys group as [${groups}], expected [${expected}]`);
+            }
+
+            // 4. Nothing clipped at either end.
+            const leftmost = Math.min(...layout.keys.map((k) => k.left));
+            const rightmost = Math.max(...layout.keys.map((k) => k.right));
+            if (leftmost < layout.row.left - 1) throw new Error('a key is clipped at the left edge');
+            if (rightmost > layout.row.right + 1) throw new Error('a key is clipped at the right edge');
+        },
+    },
+    {
         name: 'three keys held at once produce three live voices',
         async run(page) {
             await page.keyboard.down('z'); // C4
@@ -343,6 +410,103 @@ const checks = [
 
             const lit = await page.$$('#keyboard .key--pressed');
             if (lit.length !== 3) throw new Error(`expected 3 lit keys, got ${lit.length}`);
+
+            // Release them: leaving keys down makes the next check, and the
+            // screenshots, depend on this one's teardown.
+            for (const key of ['z', 'c', 'b']) await page.keyboard.up(key);
+        },
+    },
+    {
+        name: 'the whole upper octave sounds',
+        async run(page) {
+            // The upper row being dead entirely went undetected: every check
+            // that pressed a note used the lower row.
+            await page.keyboard.down('q'); // C5
+            await page.keyboard.down('u'); // B5
+
+            const spy = await audioSpy(page);
+            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            if (sounding.length !== 2) throw new Error(`expected 2 live oscillators, got ${sounding.length}`);
+            const frequencies = sounding.map((n) => Math.round(n.frequency));
+            for (const expected of [523, 988]) { // C5, B5
+                if (!frequencies.includes(expected)) throw new Error(`expected ~${expected} Hz among [${frequencies}]`);
+            }
+
+            for (const key of ['q', 'u']) await page.keyboard.up(key);
+        },
+    },
+    {
+        name: 'Enter and Space hold independently',
+        async run(page) {
+            // One shared slot meant either key's release stopped the other's
+            // note, and a stray keyup killed a note that was still held.
+            await page.focus('[data-note="64"]');
+            await page.keyboard.down(' ');
+            await page.keyboard.down('Enter');
+            await page.keyboard.up('Enter');
+
+            if (!(await isLit(page, 64))) throw new Error('releasing Enter stopped the note Space is holding');
+
+            await page.keyboard.up(' ');
+            if (await isLit(page, 64)) throw new Error('the note outlived both keys');
+            await page.evaluate(() => document.activeElement.blur());
+        },
+    },
+    {
+        name: 'two pointers on different keys each release their own note',
+        async run(page) {
+            // A single pointer slot lost the first press, stranding its note
+            // sounding for good — the app's worst failure mode, and the default
+            // way anyone plays a chord on a touchscreen.
+            const at = async (selector) => {
+                const box = await (await page.$(selector)).boundingBox();
+                return { x: box.x + box.width / 2, y: box.y + box.height - 8 };
+            };
+            const first = await at('[data-note="60"]');
+            const second = await at('[data-note="64"]');
+
+            const cdp = await page.context().newCDPSession(page);
+            const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+            // In CDP, touchEnd carries the points being LIFTED, not the ones
+            // that remain. So this lifts finger 1, then finger 2.
+            await send('touchStart', [{ ...first, id: 1 }]);
+            await send('touchStart', [{ ...first, id: 1 }, { ...second, id: 2 }]);
+            await send('touchEnd', [{ ...first, id: 1 }]);
+            await send('touchEnd', [{ ...second, id: 2 }]);
+            await cdp.detach();
+
+            const lit = await page.$$('#keyboard .key--pressed');
+            if (lit.length !== 0) throw new Error(`${lit.length} key(s) stuck lit after both fingers lifted`);
+
+            const spy = await audioSpy(page);
+            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) sounding after both fingers lifted`);
+        },
+    },
+    {
+        name: 'a cancelled pointer releases its note',
+        async run(page) {
+            // pointercancel fires whenever the browser takes over the gesture —
+            // a scroll, a system gesture. Dropping it strands the note.
+            await page.evaluate(() => {
+                window.__lastPointerId = null;
+                document.addEventListener('pointerdown', (e) => { window.__lastPointerId = e.pointerId; }, { once: true });
+            });
+            await press(page, '[data-note="60"]');
+            if (!(await isLit(page, 60))) throw new Error('the note did not start');
+
+            // Cancel alone, with no pointerup after it — otherwise pointerup
+            // does the release and the check passes even with pointercancel
+            // unregistered.
+            const pointerId = await page.evaluate(() => window.__lastPointerId);
+            await page.evaluate((id) => {
+                document.dispatchEvent(new PointerEvent('pointercancel', { pointerId: id, bubbles: true }));
+            }, pointerId);
+
+            const lit = await page.$$('#keyboard .key--pressed');
+            if (lit.length !== 0) throw new Error(`${lit.length} key(s) still lit after pointercancel`);
+
+            await page.mouse.up(); // tidy up the still-down mouse button
         },
     },
 ];
