@@ -87,6 +87,13 @@ rejected the field was edited by hand; re-read it with
 `gh` cannot change the *set* of options — that needs the GraphQL
 `updateProjectV2Field` mutation, which replaces all options at once.
 
+**Adding an item can silently no-op.** `gh project item-add` and the GraphQL
+`addProjectV2ItemById` mutation both return an item id for an issue that then
+never appears in any read — CLI or GraphQL. Retrying returns the same id, so the
+write is idempotent rather than lost. Always read the board back after adding;
+if the item is missing, add it in the web UI rather than retrying, and set its
+status there too.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
