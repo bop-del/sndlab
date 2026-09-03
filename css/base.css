@@ -27,22 +27,61 @@ h1 {
 
 .hint { color: var(--muted); margin: 0 0 2rem; }
 
-button {
-    padding: .75rem 2rem;
+.hint kbd {
     font: inherit;
-    color: var(--bg);
-    background: var(--accent);
-    border: 0;
-    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--fg);
+    background: #23232e;
+    border-radius: 4px;
+    padding: .1em .4em;
+}
+
+/* Two layers. White keys flow in a row; black keys are positioned over the
+   boundaries between them, so no cumulative margin drift can creep in and the
+   E–F and B–C gaps stay black-key-free. DOM order stays chromatic. */
+.keyboard {
+    display: flex;
+    justify-content: center;
+    padding-bottom: 1rem;
+    touch-action: none; /* a drag across the keys must not scroll the page */
+}
+
+/* Shrink-wraps the white row, so the black keys' absolute offsets are measured
+   from the first white key rather than from the centred container. */
+.keyboard__keys {
+    position: relative;
+    display: flex;
+}
+
+.key {
+    font: inherit;
+    padding: 0;
+    border: 1px solid #0b0b10;
+    border-radius: 0 0 5px 5px;
     cursor: pointer;
 }
 
-button:hover { filter: brightness(1.1); }
-button:active { transform: translateY(1px); }
-
-.status {
-    margin-top: 1.5rem;
-    min-height: 1.5em;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
+.key--white {
+    width: 44px;
+    height: 190px;
+    background: linear-gradient(#fbfbfd, #dcdce4);
 }
+
+.key--black {
+    position: absolute;
+    top: 0;
+    /* `left` is set per key in Keyboard.js, where the note layout is already
+       known — the white-key count before it is what decides the position. */
+    width: 28px;
+    height: 118px;
+    background: linear-gradient(#3a3a46, #1b1b23);
+    z-index: 1;
+}
+
+.key:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -4px;
+}
+
+.key--white.key--pressed { background: linear-gradient(#ffb494, var(--accent)); }
+.key--black.key--pressed { background: linear-gradient(#d8582a, #97350f); }

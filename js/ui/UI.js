@@ -1,13 +1,8 @@
-import { AudioEngine } from '../audio/AudioEngine.js';
+import { Keyboard } from './Keyboard.js';
 
+// Composition root: find the mount points, hand them to the components.
 export const UI = {
     init() {
-        const button = document.getElementById('play');
-        const status = document.getElementById('status');
-
-        button.addEventListener('click', () => {
-            AudioEngine.playTone({ frequency: 220 });
-            status.textContent = `A3 · 220 Hz · ${AudioEngine.ctx.state}`;
-        });
+        Keyboard.init(document.getElementById('keyboard'));
     },
 };
