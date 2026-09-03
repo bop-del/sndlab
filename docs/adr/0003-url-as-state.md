@@ -40,5 +40,6 @@ if that is not enough, a binary format like AcidBros uses.
 the deliberate boundary — when it falls, it is an architecture decision with its
 own ADR.
 
-**Open:** `localStorage` for the most recent patch is compatible with this
-(per-browser, no server) and not yet decided.
+**Resolved by ADR 0006:** `localStorage` holds the most recent state so a return
+visit with no link resumes where it left off, and files on disk cover keeping and
+moving work between devices. The URL keeps sharing, unchanged.
