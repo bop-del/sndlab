@@ -131,6 +131,67 @@ function installAudioSpy() {
 
 const checks = [
     {
+        name: 'the scale picker offers both scales, with a why-sentence',
+        async run(page) {
+            const scales = await page.$$eval('#scale option', (os) => os.map((o) => o.value));
+            if (scales.length < 2) throw new Error(`expected at least 2 scales, got ${scales.length}`);
+            // The why-sentence is the tool's entire learning content. A blank
+            // one means the tool teaches nothing, and nothing else would fail.
+            const why = await page.textContent('#why');
+            if (!why || why.trim().length < 40) throw new Error(`why-sentence missing or too short: "${why}"`);
+        },
+    },
+    {
+        name: 'the keyboard marks the notes of the selected scale',
+        async run(page) {
+            await page.selectOption('#root', '64'); // E
+            await page.selectOption('#scale', 'phrygian');
+
+            // E Phrygian: F is in, F sharp is not. That one note is the whole
+            // difference between this scale and natural minor.
+            const inScale = async (note) =>
+                page.$eval(`[data-note="${note}"]`, (el) => el.classList.contains('key--in-scale'));
+            if (!(await inScale(65))) throw new Error('F is not marked in E Phrygian');
+            if (await inScale(66)) throw new Error('F sharp is marked in E Phrygian');
+            // And in the octave above, which a modulo error would miss.
+            if (!(await inScale(77))) throw new Error('F an octave up is not marked');
+        },
+    },
+    {
+        name: 'switching scale re-marks the keyboard',
+        async run(page) {
+            await page.selectOption('#scale', 'natural-minor');
+            const inScale = async (note) =>
+                page.$eval(`[data-note="${note}"]`, (el) => el.classList.contains('key--in-scale'));
+            // The contrast that makes the picker worth having: the same two
+            // notes swap roles.
+            if (await inScale(65)) throw new Error('F is still marked in E natural minor');
+            if (!(await inScale(66))) throw new Error('F sharp is not marked in E natural minor');
+
+            // Put the app back to its defaults. The screenshot is taken after
+            // every check has run, so a check that leaves state behind makes
+            // the screenshot show the test's world rather than the app's — and
+            // then the visual assessment is of something no user ever sees.
+            await page.selectOption('#scale', 'phrygian');
+            await page.selectOption('#root', '60');
+        },
+    },
+    {
+        name: 'an out-of-scale note still plays',
+        async run(page) {
+            // Muting them would hide the very contrast the tool teaches, so
+            // this is a behaviour to protect, not an oversight.
+            await page.selectOption('#scale', 'phrygian');
+            await page.evaluate(() => { window.audioSpy.nodes.length = 0; window.audioSpy.calls.length = 0; });
+            await press(page, '[data-note="66"]'); // F sharp, outside E Phrygian
+            const spy = await audioSpy(page);
+            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (started.length !== 1) throw new Error(`expected the out-of-scale note to sound, got ${started.length} voices`);
+            await release(page);
+        },
+    },
+
+    {
         name: 'page loads with a title',
         async run(page) {
             const title = await page.title();

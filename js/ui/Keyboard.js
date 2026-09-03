@@ -1,4 +1,5 @@
 import { Notes } from '../audio/Notes.js';
+import { inScale } from '../theory/Scales.js';
 
 // Two octaves, C to C. MIDI 60 is middle C.
 const FIRST_NOTE = 60;
@@ -60,6 +61,14 @@ export const Keyboard = {
         // A lost keyup — switching away mid-hold — otherwise leaves a note
         // sounding until reload.
         window.addEventListener('blur', () => this.releaseAll());
+    },
+
+    // Mark which keys belong to the selected scale. Out-of-scale keys stay
+    // playable — muting them would hide the very contrast being taught.
+    showScale(root, scale) {
+        for (const [midiNumber, key] of this.keys) {
+            key.classList.toggle('key--in-scale', inScale(midiNumber, root, scale));
+        }
     },
 
     render(container) {
