@@ -15,11 +15,12 @@ const TYPING_FIRST_NOTE = 60;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const isBlack = (midiNumber) => NOTE_NAMES[midiNumber % 12].includes('#');
 
-// Kept in step with .key--white / .key--black in css/base.css. Four octaves at
-// the old 44px ran off the window; issue #13 removes this duplication entirely
-// by sizing keys as a fraction of the container.
-const WHITE_WIDTH = 28;
-const BLACK_WIDTH = 18;
+// How many white keys the range has. This is the one number black-key placement
+// needs: a black key sits at `n / WHITE_COUNT` of the row's width, so the offset
+// is a fraction and nothing here knows how wide a key is in pixels. Key size is
+// decided in css/base.css alone (issue #13) — the two used to be written down
+// twice and kept in step by hand.
+const WHITE_COUNT = [...Array(NOTE_COUNT).keys()].filter((i) => !isBlack(FIRST_NOTE + i)).length;
 
 // The Ableton computer-MIDI layout: two chromatic rows, no shared keys. The
 // ticket named `awsedftgyhuj` for the lower octave, but that collides with the
@@ -103,9 +104,14 @@ export const Keyboard = {
             key.dataset.note = String(midiNumber);
             key.setAttribute('aria-label', `${name}${Math.floor(midiNumber / 12) - 1}`);
 
-            // Centre it on the boundary after the white keys placed so far,
-            // which is what leaves the E–F and B–C gaps black-key-free.
-            if (black) key.style.left = `${whiteCount * WHITE_WIDTH - BLACK_WIDTH / 2}px`;
+            // Put its *left edge* on the boundary after the white keys placed
+            // so far — which is what leaves the E–F and B–C gaps
+            // black-key-free — and let the stylesheet centre it on that
+            // boundary with a translate. A percentage resolves against the
+            // white row's width, so the boundary is still the boundary at any
+            // window width; centring in CSS is what keeps the black key's own
+            // width out of this file.
+            if (black) key.style.left = `${(whiteCount / WHITE_COUNT) * 100}%`;
             else whiteCount++;
 
             this.keys.set(midiNumber, key);

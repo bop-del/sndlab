@@ -56,24 +56,48 @@ h1 {
     padding-bottom: 1rem;
     touch-action: none; /* a drag across the keys must not scroll the page */
 
-    /* Four octaves is wider than a phone. The keyboard scrolls inside its own
-       box rather than pushing the page sideways — otherwise the heading, the
-       hint and the pads all slide off with it, and the checks never see it
-       because Playwright's viewport is 1280px wide and everything fits.
+    /* Four octaves is wider than a phone at any comfortable key size, so the
+       keys follow the window between two limits and the keyboard scrolls
+       inside its own box only once it hits the lower one. Scrolling here
+       rather than on the page: otherwise the heading, the hint and the pads
+       slide off with it, and no check sees it because Playwright's viewport is
+       1280px wide and everything fits.
        `flex-start` because centring an overflowing flex row puts its left end
-       out of reach; `auto` margins centre it only while it fits. */
+       out of reach — the row's own auto margins do the centring while it
+       fits. */
     overflow-x: auto;
     justify-content: flex-start;
+
+    /* The range, the floor, and the ceiling. --white-keys is how many white
+       keys C2–C6 has, which is what a white key is one share of. --key-min is
+       the narrowest a white key may get before the keyboard scrolls instead,
+       because below roughly this a key is too small to hit and shrinking
+       further trades one unusable keyboard for another. --key-max stops it
+       growing into a slab on a wide monitor: past about this, a wider key is
+       not a better one, it is just a bigger picture of a key. */
+    --white-keys: 29;
+    --key-min: 15px;
+    --key-max: 34px;
 }
 
-/* Shrink-wraps the white row, so the black keys' absolute offsets are measured
-   from the first white key rather than from the centred container. The auto
-   margins centre it while it fits and collapse to zero once it overflows, which
-   is what keeps its left end reachable inside the scrolling box. */
+/* The white row: full width of the keyboard, and the containing block the black
+   keys' percentage offsets resolve against — which is what makes their
+   placement hold at any width. Its own width is what a white key is a fraction
+   of, so key size is decided here and nowhere else.
+
+   The two limits: `min-width` is the floor — the row stops shrinking at 29
+   minimum-width keys and the keyboard scrolls from there — and `max-width` the
+   ceiling, past which it centres instead of growing. */
 .keyboard__keys {
-    margin-inline: auto;
     position: relative;
     display: flex;
+    flex: 1 1 auto;
+    min-width: calc(var(--white-keys) * var(--key-min));
+    max-width: calc(var(--white-keys) * var(--key-max));
+    /* Collapses to zero while the row is filling the width, and again once it
+       overflows — so it centres the keyboard only at the cap, and never puts
+       its left end out of reach inside the scrolling box. */
+    margin-inline: auto;
 }
 
 .key {
@@ -89,18 +113,36 @@ h1 {
        so only the white ones need it — and giving it to .key would change how
        the black keys position themselves. */
     position: relative;
-    width: 28px;
-    height: 170px;
+    /* An equal share of the row, whatever the row's width is. `flex-basis: 0`
+       rather than a width, so 29 keys divide the row exactly and no rounding
+       leaves a sliver at the end. `min-width: 0` lets them shrink below their
+       content box; the row's own min-width is where shrinking actually stops. */
+    flex: 1 1 0;
+    min-width: 0;
+    /* Height follows width: a key that is a fraction of the window has to keep
+       a key's proportions, or it reads as a squat block on a wide screen and a
+       thin slat on a narrow one. 1:6 is roughly a real white key.
+       `aspect-ratio` rather than a percentage height, because a flex child's
+       percentage height resolves against the container's height — which is
+       itself set by the keys, so there is nothing there to resolve against. */
+    aspect-ratio: 1 / 6;
     background: linear-gradient(#fbfbfd, #dcdce4);
 }
 
 .key--black {
     position: absolute;
     top: 0;
-    /* `left` is set per key in Keyboard.js, where the note layout is already
-       known — the white-key count before it is what decides the position. */
-    width: 18px;
-    height: 105px;
+    /* `left` is set per key in Keyboard.js as a percentage of the white row —
+       the count of white keys before it over the total. That puts the key's
+       left edge on the boundary between two white keys; the translate then
+       centres it there, which is the only place its own width is needed. Doing
+       it this way keeps every pixel out of the rendering code. */
+    width: calc(100% / var(--white-keys) * .64);
+    transform: translateX(-50%);
+    /* Of the white key it sits on, which is now whatever the window makes it —
+       so the proportion is stated and the pixels are not. The white row is the
+       containing block, and it is exactly as tall as a white key. */
+    height: 62%;
     background: linear-gradient(#3a3a46, #1b1b23);
     z-index: 1;
 }
@@ -174,21 +216,23 @@ h1 {
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 8px;
-    height: 8px;
+    /* A share of the key, not a pixel count: the key's width now follows the
+       window, and a fixed dot that reads well at 34px crowds the key at 15px
+       and is lost on it at 34. Clamped so it stays a dot at either end. */
+    width: clamp(4px, 30%, 9px);
+    aspect-ratio: 1;
     border-radius: 50%;
-}
-
-.key--white.key--in-scale::after {
-    bottom: 8px;
     background: var(--accent);
 }
+
+/* Sat near the tip in pixels before, which put the black keys' dots a hair
+   above where the white keys' row starts and read as one cluttered double row.
+   As a share of each key's own height the two rows stay clearly apart at every
+   size. */
+.key--white.key--in-scale::after { bottom: 4%; }
 
 .key--black.key--in-scale::after {
-    bottom: 6px;
-    width: 6px;
-    height: 6px;
-    background: var(--accent);
+    bottom: 6%;
     opacity: .9;
 }
 

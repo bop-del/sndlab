@@ -908,65 +908,123 @@ const checks = [
             // Issue #4: the pitch mapping can be perfect while the thing does
             // not read as a keyboard. No other check looks at position, so this
             // regression would otherwise only ever be caught by eye.
-            const layout = await page.evaluate(() => {
-                const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-                const keys = [...document.querySelectorAll('#keyboard .key')].map((key) => ({
-                    note: Number(key.dataset.note),
-                    black: key.classList.contains('key--black'),
-                    left: key.getBoundingClientRect().left,
-                    right: key.getBoundingClientRect().right,
-                }));
-                const row = document.querySelector('.keyboard__keys').getBoundingClientRect();
-                return {
-                    row: { left: row.left, right: row.right },
-                    keys: keys.map((k) => ({ ...k, name: names[k.note % 12] })),
-                };
+            assertKeyboardGeometry(await keyboardLayout(page));
+        },
+    },
+    {
+        name: 'the keyboard fills the width it is given, and stays aligned doing it',
+        async run(page) {
+            // Issue #13. Keys are a fraction of the row rather than a fixed
+            // pixel count, so the whole layout is a different arithmetic at
+            // every window width — and the one that was looked at by eye is
+            // the one width it is guaranteed correct at.
+            //
+            // Two widths, both wide enough that the keyboard fits: the point is
+            // that it *uses* the room, and that black keys still straddle their
+            // boundaries when a white key is no longer a round number of pixels.
+            const original = page.viewportSize();
+            try {
+                const widths = [1280, 900];
+                const measured = [];
+                for (const width of widths) {
+                    await page.setViewportSize({ width, height: 800 });
+                    const layout = await keyboardLayout(page);
+                    // Alignment is the whole risk of fluid sizing, so every
+                    // geometric assertion is re-run at each width rather than
+                    // trusted from the default one.
+                    assertKeyboardGeometry(layout);
+                    measured.push({ width, row: layout.row.right - layout.row.left });
+                }
+
+                // Fluid means the rendered keyboard is narrower in a narrower
+                // window. A fixed-width keyboard passes every alignment
+                // assertion above and fails here, which is the defect.
+                const [wide, narrow] = measured;
+                if (narrow.row >= wide.row - 1) {
+                    throw new Error(
+                        `the keyboard is ${narrow.row}px at ${narrow.width}px wide and ${wide.row}px at `
+                        + `${wide.width}px — it does not follow the window`,
+                    );
+                }
+
+                // It fills the width it is given up to the cap — past which a
+                // wider key is not a better one, so the row stops growing and
+                // centres instead. Asserted as "either filling the box or at
+                // the cap", because either is correct and which one applies
+                // depends on a size decision that lives in the stylesheet.
+                await page.setViewportSize({ width: 900, height: 800 });
+                const fit = await page.evaluate(() => {
+                    const keyboard = document.querySelector('.keyboard');
+                    const row = keyboard.querySelector('.keyboard__keys');
+                    const style = getComputedStyle(row);
+                    return {
+                        fill: row.getBoundingClientRect().width / keyboard.clientWidth,
+                        atCap: Math.abs(row.getBoundingClientRect().width - parseFloat(style.maxWidth)) < 1,
+                    };
+                });
+                if (fit.fill < 0.99 && !fit.atCap) {
+                    throw new Error(`the keyboard fills only ${Math.round(fit.fill * 100)}% of the width it has, and is not at its cap`);
+                }
+
+                // A key stays a key's shape at every width — the failure fluid
+                // sizing invites is a squat block on a wide screen or a thin
+                // slat on a narrow one, and no pitch assertion can see it.
+                for (const width of [1280, 700]) {
+                    await page.setViewportSize({ width, height: 800 });
+                    const shape = await page.evaluate(() => {
+                        const key = document.querySelector('#keyboard .key--white').getBoundingClientRect();
+                        return key.height / key.width;
+                    });
+                    if (shape < 4 || shape > 8) {
+                        throw new Error(`a white key is ${shape.toFixed(1)}× taller than wide at ${width}px — not a key's proportions`);
+                    }
+                }
+            } finally {
+                await page.setViewportSize(original);
+            }
+        },
+    },
+    {
+        name: 'no key size is written down in the rendering code',
+        async run(page) {
+            // The coupling this ticket removes: a key's width used to live in
+            // the stylesheet *and* in Keyboard.js, which multiplied it to place
+            // the black keys, with a comment asking the two to be kept in step
+            // by hand. The stylesheet is now the only place a size is decided,
+            // and this is what keeps a pixel from creeping back in.
+            const source = await (await fetch(`http://localhost:${PORT}/js/ui/Keyboard.js`)).text();
+            const pixels = source
+                .split('\n')
+                .filter((line) => !line.trim().startsWith('//'))
+                .filter((line) => /\d+\s*px/.test(line));
+            if (pixels.length) {
+                throw new Error(`Keyboard.js decides a size in pixels:\n            ${pixels.join('\n            ')}`);
+            }
+
+            // The inline styles it does write are percentages of the row — the
+            // one thing a fraction-sized keyboard can be positioned in.
+            const offsets = await page.$$eval('#keyboard .key--black', (els) => els.map((el) => el.style.left));
+            const wrong = offsets.filter((left) => !left.endsWith('%'));
+            if (wrong.length) throw new Error(`a black key is positioned in ${wrong[0]}, not a percentage`);
+
+            // The one number both sides still share: how many white keys the
+            // range has. Keyboard.js derives it from the range, so it cannot
+            // drift; the stylesheet states it, so it can. If they disagree the
+            // black keys land on fractions of the wrong row and every offset
+            // is subtly off — which is the failure this ticket's whole point
+            // was to make impossible, so it gets an assertion rather than a
+            // comment asking for care.
+            const agreed = await page.evaluate(() => {
+                const declared = Number(
+                    getComputedStyle(document.querySelector('.keyboard')).getPropertyValue('--white-keys'),
+                );
+                return { declared, rendered: document.querySelectorAll('#keyboard .key--white').length };
             });
-
-            // 1. No black key on the E–F or B–C boundary — the gaps are what
-            //    make the groups legible.
-            for (const white of layout.keys.filter((k) => !k.black)) {
-                if (white.name !== 'E' && white.name !== 'B') continue;
-                const next = layout.keys.find((k) => k.note === white.note + 1);
-                if (next?.black) throw new Error(`a black key sits above ${white.name} — that gap must be empty`);
+            if (agreed.declared !== agreed.rendered) {
+                throw new Error(
+                    `the stylesheet sizes for ${agreed.declared} white keys, the keyboard renders ${agreed.rendered}`,
+                );
             }
-
-            // 2. Each black key straddles the boundary between two white keys,
-            //    rather than floating over the middle of one.
-            const whites = layout.keys.filter((k) => !k.black);
-            for (const black of layout.keys.filter((k) => k.black)) {
-                const centre = (black.left + black.right) / 2;
-                const straddled = whites.some((w) => Math.abs(w.right - centre) < 1);
-                if (!straddled) throw new Error(`the black key at MIDI ${black.note} does not sit on a white-key boundary`);
-            }
-
-            // 3. The groups really are 2 then 3. DOM order is chromatic, so
-            //    black keys are never adjacent there — the grouping is a fact
-            //    about horizontal position. Walk them left to right and split
-            //    the run wherever the gap widens to a skipped white key.
-            const blacks = layout.keys.filter((k) => k.black).sort((a, b) => a.left - b.left);
-            const step = Math.min(...blacks.slice(1).map((k, i) => k.left - blacks[i].left));
-            const groups = [];
-            let run = 1;
-            for (let i = 1; i < blacks.length; i++) {
-                // A gap of one step means the next black key is the neighbour;
-                // anything wider is the E–F or B–C skip that ends a group.
-                if (blacks[i].left - blacks[i - 1].left < step * 1.5) run++;
-                else { groups.push(run); run = 1; }
-            }
-            groups.push(run);
-
-            // Four octaves from C: 2,3 four times — the final C adds no black key.
-            const expected = [2, 3, 2, 3, 2, 3, 2, 3];
-            if (String(groups) !== String(expected)) {
-                throw new Error(`black keys group as [${groups}], expected [${expected}]`);
-            }
-
-            // 4. Nothing clipped at either end.
-            const leftmost = Math.min(...layout.keys.map((k) => k.left));
-            const rightmost = Math.max(...layout.keys.map((k) => k.right));
-            if (leftmost < layout.row.left - 1) throw new Error('a key is clipped at the left edge');
-            if (rightmost > layout.row.right + 1) throw new Error('a key is clipped at the right edge');
         },
     },
     {
@@ -1277,6 +1335,81 @@ async function release(page) {
     await page.mouse.up();
 }
 
+// ─── Keyboard geometry ───────────────────────────────────────────────────────
+// Read once, asserted many times. Keys are sized as a fraction of the row
+// (issue #13), so the layout is different arithmetic at every window width and
+// every geometric assertion has to be re-runnable at a new one.
+
+async function keyboardLayout(page) {
+    return page.evaluate(() => {
+        const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const keys = [...document.querySelectorAll('#keyboard .key')].map((key) => ({
+            note: Number(key.dataset.note),
+            black: key.classList.contains('key--black'),
+            left: key.getBoundingClientRect().left,
+            right: key.getBoundingClientRect().right,
+        }));
+        const row = document.querySelector('.keyboard__keys').getBoundingClientRect();
+        return {
+            row: { left: row.left, right: row.right },
+            keys: keys.map((k) => ({ ...k, name: names[k.note % 12] })),
+        };
+    });
+}
+
+function assertKeyboardGeometry(layout) {
+    // 1. No black key on the E–F or B–C boundary — the gaps are what
+    //    make the groups legible.
+    for (const white of layout.keys.filter((k) => !k.black)) {
+        if (white.name !== 'E' && white.name !== 'B') continue;
+        const next = layout.keys.find((k) => k.note === white.note + 1);
+        if (next?.black) throw new Error(`a black key sits above ${white.name} — that gap must be empty`);
+    }
+
+    // 2. Each black key straddles the boundary between two white keys,
+    //    rather than floating over the middle of one. The tolerance is a
+    //    device pixel: a fractional key width means the boundary lands
+    //    off the integer grid, and the browser rounds the two rectangles
+    //    independently. Anything looser stops being an alignment check.
+    const whites = layout.keys.filter((k) => !k.black);
+    for (const black of layout.keys.filter((k) => k.black)) {
+        const centre = (black.left + black.right) / 2;
+        const straddled = whites.some((w) => Math.abs(w.right - centre) < 1);
+        if (!straddled) throw new Error(`the black key at MIDI ${black.note} does not sit on a white-key boundary`);
+    }
+
+    // 3. The groups really are 2 then 3. DOM order is chromatic, so
+    //    black keys are never adjacent there — the grouping is a fact
+    //    about horizontal position. Walk them left to right and split
+    //    the run wherever the gap widens to a skipped white key.
+    const blacks = layout.keys.filter((k) => k.black).sort((a, b) => a.left - b.left);
+    const step = Math.min(...blacks.slice(1).map((k, i) => k.left - blacks[i].left));
+    const groups = [];
+    let run = 1;
+    for (let i = 1; i < blacks.length; i++) {
+        // A gap of one step means the next black key is the neighbour;
+        // anything wider is the E–F or B–C skip that ends a group.
+        if (blacks[i].left - blacks[i - 1].left < step * 1.5) run++;
+        else { groups.push(run); run = 1; }
+    }
+    groups.push(run);
+
+    // Four octaves from C: 2,3 four times — the final C adds no black key.
+    const expected = [2, 3, 2, 3, 2, 3, 2, 3];
+    if (String(groups) !== String(expected)) {
+        throw new Error(`black keys group as [${groups}], expected [${expected}]`);
+    }
+
+    // 4. Nothing clipped at either end — black keys included. A black key
+    //    is centred on a boundary, and C2 and C6 are naturals with no
+    //    black key outside them, so every key of either colour must fall
+    //    inside the row.
+    const leftmost = Math.min(...layout.keys.map((k) => k.left));
+    const rightmost = Math.max(...layout.keys.map((k) => k.right));
+    if (leftmost < layout.row.left - 1) throw new Error('a key is clipped at the left edge');
+    if (rightmost > layout.row.right + 1) throw new Error('a key is clipped at the right edge');
+}
+
 async function isLit(page, midiNumber) {
     return page.evaluate(
         (note) => document.querySelector(`[data-note="${note}"]`).classList.contains('key--pressed'),
@@ -1386,7 +1519,19 @@ async function runChecks(browser, engine) {
         await page.click('#drone');
         await page.click('.pad[data-degree="0"]');
 
-        console.log(`\n  screenshots → ${idle.replace(ROOT, '')}, ${chord.replace(ROOT, '')}`);
+        // The keyboard is sized as a fraction of the window (issue #13), so
+        // there is no longer one layout to look at. A narrow shot is where
+        // fluid sizing actually goes wrong — keys too thin to read, a
+        // misaligned black key, the in-scale dot bigger than the key it marks —
+        // and none of that is visible at 1280px.
+        const original = page.viewportSize();
+        await page.setViewportSize({ width: 700, height: 800 });
+        const narrow = join(SHOTS, 'app-narrow.png');
+        await page.screenshot({ path: narrow, fullPage: true });
+        await page.setViewportSize(original);
+
+        const shots = [idle, chord, narrow].map((f) => f.replace(ROOT, '')).join(', ');
+        console.log(`\n  screenshots → ${shots}`);
         console.log('                (look at them — it is not verified until you have)');
     }
 
