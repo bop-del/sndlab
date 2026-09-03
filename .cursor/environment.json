@@ -1,0 +1,11 @@
+{
+  "name": "sndlab",
+  "install": "npm install\nnpx playwright install --with-deps chromium webkit",
+  "terminals": [
+    {
+      "name": "dev-server",
+      "command": "python3 -m http.server 8000"
+    }
+  ],
+  "ports": [8000]
+}
