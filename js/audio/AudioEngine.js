@@ -12,6 +12,9 @@ export function noteToFrequency(midiNumber) {
 // floor an exponential ramp cannot cross — it never reaches zero, so silence
 // has to be approached rather than arrived at.
 const SILENCE = 0.0001;
+// Where the shared filter rests: effectively open, so it colours nothing until
+// the player moves it. The preset's own cutoff lives on the per-voice filter.
+const SHARED_CUTOFF_OPEN = 9000;
 // Headroom for an async resume() to land before the envelope starts. Inaudible
 // as latency; the difference between a note and silence on iOS.
 const RESUME_HEADROOM = 0.06;
@@ -75,40 +78,80 @@ export const AudioEngine = {
     // impulse-response file, and a binary asset sits badly against the
     // no-dependencies rule for the gain it buys here.
     buildChain(ctx) {
+        // The player's control, not a second copy of the preset's. Each voice
+        // has its own filter and envelope doing the tone shaping; setting this
+        // one to the preset cutoff as well put two lowpasses in series at the
+        // same frequency and made every note sound distant.
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.value = this.preset.cutoff;
-        filter.Q.value = this.preset.resonance;
+        filter.frequency.value = SHARED_CUTOFF_OPEN;
+        filter.Q.value = 0.7; // gentle: resonance belongs to the voice filter
 
         const dry = ctx.createGain();
         const wet = ctx.createGain();
         dry.gain.value = 1;
         wet.gain.value = this.preset.reverb;
 
-        // Prime numbers of milliseconds, so the delays never line up and the
-        // tail reads as a room rather than as a rhythmic echo.
-        const damping = ctx.createBiquadFilter();
-        damping.type = 'lowpass';
-        // Real rooms absorb treble first. Without this the tail sounds metallic.
-        damping.frequency.value = 2400;
+        // Four comb filters in parallel, each with its own damped feedback
+        // loop, summed into the wet bus — the Schroeder/Freeverb shape.
+        //
+        // The first version ran away. Every comb was fed at full level and fed
+        // back at 0.55, and with four summing into one bus the loop gain was
+        // well over 1, so it self-oscillated: measured output peaked above 24,
+        // twenty-four times full scale. That howl was most of "sounds really
+        // bad". Two things keep it stable: each comb takes a quarter of the
+        // input, and each damps inside its own loop rather than sharing one
+        // filter, which had joined four loops into a single much louder one.
+        const spread = ctx.createGain();
+        spread.gain.value = 0.25;
+        filter.connect(spread);
 
-        for (const ms of [37, 53, 71, 97]) {
+        // Output trim. Per-note gains are set low so a six-voice chord has
+        // headroom, which leaves a single note too quiet to enjoy — this makes
+        // up the difference after the sum, where the limiter can still catch a
+        // pile-up. Raising the per-note gains instead would trade one problem
+        // for the other.
+
+        for (const ms of [29.7, 37.1, 41.1, 43.7]) {
             const delay = ctx.createDelay(1);
             delay.delayTime.value = ms / 1000;
-            const feedback = ctx.createGain();
-            feedback.gain.value = 0.55;
 
-            filter.connect(delay);
-            delay.connect(feedback).connect(damping).connect(delay);
+            const feedback = ctx.createGain();
+            feedback.gain.value = 0.7; // clear of 1, so the tail decays
+
+            const damping = ctx.createBiquadFilter();
+            damping.type = 'lowpass';
+            damping.frequency.value = 3000; // rooms absorb treble first
+
+            spread.connect(delay);
+            delay.connect(damping).connect(feedback).connect(delay);
             delay.connect(wet);
         }
 
+        // Nothing caps how many notes sound at once — a chord plus a drone
+        // plus a melody is six voices — and dividing gain by voice count would
+        // make single notes weak to guard against a rare case. Tone's Limiter
+        // recipe instead: brick-wall ratio, fast release, threshold just under
+        // full scale, so ordinary playing passes untouched.
+        const trim = ctx.createGain();
+        trim.gain.value = 2.6;
+
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -6;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.003;
+        limiter.release.value = 0.05;
+        limiter.knee.value = 0;
+
         filter.connect(dry);
-        dry.connect(ctx.destination);
-        wet.connect(ctx.destination);
+        dry.connect(trim);
+        wet.connect(trim);
+        trim.connect(limiter);
+        limiter.connect(ctx.destination);
 
         this.filter = filter;
         this.reverb = wet;
+        this.limiter = limiter;
         return filter;
     },
 
@@ -122,12 +165,9 @@ export const AudioEngine = {
     setPreset(id) {
         this.preset = presetById(id);
         if (!this.filter) return;
-        const now = this.ctx.currentTime;
-        // Ramped rather than set: a jump in cutoff on a sounding note is an
-        // audible click.
-        this.filter.frequency.setTargetAtTime(this.preset.cutoff, now, 0.02);
-        this.filter.Q.setTargetAtTime(this.preset.resonance, now, 0.02);
-        this.reverb.gain.setTargetAtTime(this.preset.reverb, now, 0.02);
+        // Only the reverb amount belongs to the preset here; the shared filter
+        // is the player's and stays where they left it.
+        this.reverb.gain.setTargetAtTime(this.preset.reverb, this.ctx.currentTime, 0.02);
     },
 
     /** Live filter control — takes effect on notes already sounding. */
@@ -159,7 +199,29 @@ export const AudioEngine = {
         const gain = ctx.createGain();
         gain.gain.setValueAtTime(0, now);
         gain.gain.linearRampToValueAtTime(peak, now + attack);
-        gain.connect(destination);
+
+        // Each voice gets its own filter so the cutoff moves over the life of
+        // *that note*. A note that starts bright and darkens is most of what
+        // separates a synth from a tone generator, and a static cutoff was the
+        // single biggest thing missing from the first version.
+        const env = this.preset.filterEnvelope;
+        const voiceFilter = ctx.createBiquadFilter();
+        voiceFilter.type = 'lowpass';
+        voiceFilter.Q.value = this.preset.resonance;
+
+        const base = this.preset.cutoff;
+        const open = Math.min(base * 2 ** env.octaves, 18000);
+        const sustained = Math.min(base * 2 ** (env.octaves * env.sustain), 18000);
+        voiceFilter.frequency.setValueAtTime(base, now);
+        voiceFilter.frequency.linearRampToValueAtTime(open, now + env.attack);
+        // Exponential: brightness is heard logarithmically, so a linear fall
+        // sounds like it stops moving halfway down.
+        voiceFilter.frequency.exponentialRampToValueAtTime(
+            Math.max(sustained, 40),
+            now + env.attack + env.decay,
+        );
+
+        gain.connect(voiceFilter).connect(destination);
 
         const oscillators = layers.map((layer) => {
             const osc = ctx.createOscillator();

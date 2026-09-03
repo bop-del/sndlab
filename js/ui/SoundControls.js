@@ -20,16 +20,15 @@ export const SoundControls = {
         // perfectly good 900 Hz pad shows a slider that looks switched off.
         // Position 0–1 maps onto the range geometrically, so equal movement is
         // equal musical distance.
-        const cutoff = slider('cutoff', 'Cutoff', 0, 1, hzToPosition(PRESETS[0].cutoff), 0.001);
-        const resonance = slider('resonance', 'Resonance', 0.5, 18, PRESETS[0].resonance, 0.5);
+        // The shared filter is the player's and starts open — the preset's own
+        // cutoff lives on the per-voice filter and is not this control.
+        const cutoff = slider('cutoff', 'Cutoff', 0, 1, 1, 0.001);
+        const resonance = slider('resonance', 'Resonance', 0.5, 18, 0.7, 0.5);
 
         preset.addEventListener('change', () => {
             AudioEngine.setPreset(preset.value);
-            // The sliders show where the new preset put the filter, so they
-            // never lie about what you are hearing.
-            const chosen = presetById(preset.value);
-            cutoff.input.value = String(hzToPosition(chosen.cutoff));
-            resonance.input.value = String(chosen.resonance);
+            // The sliders are not reset by a preset change: the filter setting
+            // is the player's, and yanking it back would undo a sweep.
         });
 
         cutoff.input.addEventListener('input', () => AudioEngine.setCutoff(positionToHz(Number(cutoff.input.value))));
