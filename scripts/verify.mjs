@@ -178,39 +178,74 @@ function installAudioSpy() {
 // device. This inserts a zero gain at the very last hop, between the graph and
 // the speakers: everything the checks assert on still happens, and nothing
 // comes out.
+//
+// Measured, by tapping the destination with an analyser and reading peak
+// amplitude: unmuted both engines put a full-scale 440 Hz tone on the device;
+// with this in place peak is 0.000000 on both, while an OfflineAudioContext
+// still renders 0.999999 and the oscillator still reports sine/440.
 
 function silenceOutput() {
     const mute = (Ctor) => {
         if (!Ctor) return;
-        const proto = Ctor.prototype;
-        const real = Object.getOwnPropertyDescriptor(proto, 'destination');
-        if (!real?.get) return;
+        // `destination` lives on BaseAudioContext, which OfflineAudioContext
+        // inherits too — so redefining it on the prototype that owns it would
+        // zero offline renders as well. It is defined on each live context
+        // instead: the override shadows the inherited accessor for that one
+        // context, and an OfflineAudioContext keeps the real one.
+        let proto = Ctor.prototype;
+        let realDestination;
+        while (proto && !(realDestination = Object.getOwnPropertyDescriptor(proto, 'destination'))) {
+            proto = Object.getPrototypeOf(proto);
+        }
+        if (!realDestination?.get) return;
 
-        // One muted node per context, built lazily: `destination` is read on
-        // every connect(), and a fresh node each time would leave the graph
-        // fanning out into nodes nothing else references.
-        const muted = new WeakMap();
-        Object.defineProperty(proto, 'destination', {
-            configurable: true,
-            enumerable: real.enumerable,
-            get() {
-                const destination = real.get.call(this);
-                if (!muted.has(this)) {
-                    const gain = this.createGain();
-                    gain.gain.value = 0;
-                    gain.connect(destination);
-                    muted.set(this, gain);
-                }
-                return muted.get(this);
-            },
-        });
+        // Built through the *unpatched* createGain. installAudioSpy replaces
+        // the prototype method and logs every gain node it makes, so calling
+        // ctx.createGain() here would seed the spy with a node no check caused
+        // — a record the checks did not ask for, in a log they read.
+        const createGain = Ctor.prototype.createGain;
+
+        const Wrapped = function (...args) {
+            const ctx = new Ctor(...args);
+            const destination = realDestination.get.call(ctx);
+            const gain = createGain.call(ctx);
+            gain.gain.value = 0;
+            gain.connect(destination);
+            // Own property, so it shadows the inherited getter for this context
+            // only. Built once: `destination` is read on every connect(), and a
+            // node per read would fan the graph out into nodes nothing holds.
+            Object.defineProperty(ctx, 'destination', {
+                configurable: true,
+                get: () => gain,
+            });
+            return ctx;
+        };
+        // Not cosmetic: the late-resume check does `class extends
+        // window.AudioContext`, and sharing the prototype is what keeps that
+        // subclass working through the wrapper.
+        Wrapped.prototype = Ctor.prototype;
+        return Wrapped;
     };
 
-    // An OfflineAudioContext renders to a buffer, not to the speakers, so it is
-    // silent already and is left alone — muting it would zero a result a check
-    // may one day want to read.
-    mute(window.AudioContext);
-    mute(window.webkitAudioContext);
+    const AudioCtx = mute(window.AudioContext);
+    if (AudioCtx) window.AudioContext = AudioCtx;
+    const WebkitCtx = mute(window.webkitAudioContext);
+    if (WebkitCtx) window.webkitAudioContext = WebkitCtx;
+}
+
+// Every page in the run is made here, so no page can be born audible. The mute
+// is per-page (addInitScript), so a check that opened its own page and skipped
+// it played out loud — which is exactly what happened, twice per run, until a
+// review caught it. A helper closes the class of bug rather than the instance.
+//
+// Order matters: silenceOutput captures the pristine createGain, before the spy
+// replaces it. The other way round the mute's own gain node lands in the log
+// the checks read.
+async function newPage(browser) {
+    const page = await browser.newPage();
+    await page.addInitScript(silenceOutput);
+    await page.addInitScript(installAudioSpy);
+    return page;
 }
 
 // ─── Checks ──────────────────────────────────────────────────────────────────
@@ -569,7 +604,7 @@ const checks = [
             // Every other check runs against a page already settled by
             // `networkidle`, which would hide init that never happened on an
             // ordinary load. This one asks immediately, on a fresh page.
-            const fresh = await browser.newPage();
+            const fresh = await newPage(browser);
             try {
                 await fresh.goto(`http://localhost:${PORT}/`, { waitUntil: 'load' });
                 const keys = await fresh.$$eval('#keyboard .key', (els) => els.length);
@@ -585,10 +620,8 @@ const checks = [
             // Older WebKit ships only the prefixed constructor. Current iOS has
             // the unprefixed one — so this is defensive, not the cause of #5;
             // that turned out to be the resume race checked above.
-            const ios = await browser.newPage();
+            const ios = await newPage(browser);
             try {
-                await ios.addInitScript(installAudioSpy);
-                await ios.addInitScript(silenceOutput);
                 await ios.addInitScript(() => {
                     window.webkitAudioContext = window.AudioContext;
                     delete window.AudioContext;
@@ -621,7 +654,7 @@ const checks = [
             // the envelope at that frozen time puts the note before audio starts
             // flowing, so it is never heard — silent, with no error anywhere.
             // Desktop resumes fast enough to hide it entirely.
-            const ios = await browser.newPage();
+            const ios = await newPage(browser);
             try {
                 await ios.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
                 const result = await ios.evaluate(async () => {
@@ -1293,7 +1326,7 @@ try {
 
 async function runChecks(browser, engine) {
     let failed = 0;
-    const page = await browser.newPage();
+    const page = await newPage(browser);
 
     // Level 1: anything the page says about itself. Collected for the whole run,
     // asserted at the end so a late error still fails the run.
@@ -1303,8 +1336,6 @@ async function runChecks(browser, engine) {
     page.on('pageerror', (e) => consoleErrors.push(String(e)));
     page.on('requestfailed', (r) => failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`));
 
-    await page.addInitScript(installAudioSpy);
-    await page.addInitScript(silenceOutput);
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
 
     for (const check of checks) {
