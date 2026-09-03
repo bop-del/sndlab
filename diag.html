@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sndlab · iOS audio diagnosis</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:16px; background:#14141a; color:#e8e8ef;
+         font:16px/1.5 -apple-system, system-ui, sans-serif; }
+  h1 { font-size:1.1rem; margin:0 0 4px; }
+  p.sub { color:#8a8a9a; margin:0 0 16px; font-size:.85rem; }
+  button { font:inherit; padding:18px; width:100%; margin-bottom:10px;
+           background:#ff6b35; color:#14141a; border:0; border-radius:8px;
+           font-weight:600; -webkit-tap-highlight-color:transparent; }
+  button.alt { background:#2a2a36; color:#e8e8ef; }
+  pre { background:#0c0c11; border:1px solid #2a2a36; border-radius:8px;
+        padding:12px; font-size:12px; line-height:1.45; white-space:pre-wrap;
+        word-break:break-word; margin:0 0 12px; }
+  .ok{color:#5dd39e}.bad{color:#ff6b6b}.warn{color:#ffd166}
+</style>
+</head>
+<body>
+<h1>sndlab · iOS audio diagnosis</h1>
+<p class="sub">Tap the buttons top to bottom, then send the report back.</p>
+
+<button id="t1">1 — Test A: plain oscillator (simplest possible)</button>
+<button id="t2">2 — Test B: exactly what the app does</button>
+<button class="alt" id="copy">Copy report</button>
+<pre id="log">ready…</pre>
+
+<script>
+const L = document.getElementById('log');
+const lines = [];
+function log(msg, cls) {
+  lines.push(msg);
+  L.innerHTML = lines.map(l => {
+    const c = l.startsWith('OK') ? 'ok' : l.startsWith('FAIL') ? 'bad' : l.startsWith('!') ? 'warn' : '';
+    return c ? `<span class="${c}">${l}</span>` : l;
+  }).join('\n');
+}
+
+// ---- environment, gathered up front -------------------------------------
+const Ctor = window.AudioContext || window.webkitAudioContext;
+log('UA: ' + navigator.userAgent);
+log('AudioContext:        ' + (window.AudioContext ? 'yes' : 'NO'));
+log('webkitAudioContext:  ' + (window.webkitAudioContext ? 'yes' : 'NO'));
+log('PointerEvent:        ' + (window.PointerEvent ? 'yes' : 'NO'));
+log('ontouchstart:        ' + ('ontouchstart' in window ? 'yes' : 'no'));
+if (Ctor) {
+  const p = Ctor.prototype;
+  log('ctx.resume():        ' + (p.resume ? 'yes' : 'NO'));
+  log('osc.start():         ' + (window.OscillatorNode && OscillatorNode.prototype.start ? 'yes' : 'NO — needs noteOn()'));
+  log('gain exp ramp:       ' + (window.AudioParam && AudioParam.prototype.exponentialRampToValueAtTime ? 'yes' : 'NO'));
+}
+log('—'.repeat(28));
+
+// ---- Test A: the simplest thing that could make a sound ------------------
+document.getElementById('t1').addEventListener('click', async () => {
+  log('\n== Test A: plain oscillator ==');
+  try {
+    if (!Ctor) { log('FAIL no AudioContext constructor at all'); return; }
+    const ctx = new Ctor();
+    log('state after new:     ' + ctx.state);
+    if (ctx.resume) { await ctx.resume(); log('state after resume:  ' + ctx.state); }
+    log('sampleRate:          ' + ctx.sampleRate);
+    log('destination ch:      ' + ctx.destination.channelCount);
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.3;
+    osc.frequency.value = 440;
+    osc.connect(gain).connect(ctx.destination);
+    (osc.start || osc.noteOn).call(osc, 0);
+    log('currentTime at start: ' + ctx.currentTime.toFixed(4));
+    setTimeout(() => {
+      log('currentTime +600ms:  ' + ctx.currentTime.toFixed(4) +
+          (ctx.currentTime > 0 ? '  OK clock is running' : '  FAIL clock frozen'));
+      log('state now:           ' + ctx.state);
+      (osc.stop || osc.noteOff).call(osc, 0);
+      log('>> Did you HEAR a beep? (check silent switch + volume)');
+    }, 600);
+  } catch (e) { log('FAIL threw: ' + e.name + ': ' + e.message); }
+});
+
+// ---- Test B: the app's own code path ------------------------------------
+document.getElementById('t2').addEventListener('click', async () => {
+  log('\n== Test B: the app\'s path ==');
+  try {
+    const { AudioEngine } = await import('./js/audio/AudioEngine.js');
+    log('module imported:     OK');
+    const voice = AudioEngine.noteOn(69);
+    const ctx = AudioEngine.ctx;
+    log('ctx state:           ' + ctx.state);
+    log('sampleRate:          ' + ctx.sampleRate);
+    log('voices:              ' + AudioEngine.voices.size);
+    setTimeout(() => {
+      log('currentTime +600ms:  ' + ctx.currentTime.toFixed(4) +
+          (ctx.currentTime > 0 ? '  OK clock running' : '  FAIL clock frozen'));
+      log('state now:           ' + ctx.state);
+      voice.stop();
+      log('>> Did you HEAR a note?');
+    }, 600);
+  } catch (e) { log('FAIL threw: ' + e.name + ': ' + e.message + '\n' + (e.stack||'').split('\n').slice(0,3).join('\n')); }
+});
+
+document.getElementById('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(lines.join('\n')); log('\n(report copied)'); }
+  catch { log('\n(copy failed — screenshot instead)'); }
+});
+
+window.addEventListener('error', e => log('FAIL window error: ' + e.message));
+window.addEventListener('unhandledrejection', e => log('FAIL rejection: ' + (e.reason && e.reason.message)));
+</script>
+</body>
+</html>
