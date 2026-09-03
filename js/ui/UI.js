@@ -1,5 +1,6 @@
 import { Keyboard } from './Keyboard.js';
 import { ScalePicker } from './ScalePicker.js';
+import { SoundControls } from './SoundControls.js';
 
 // Composition root: find the mount points, hand them to the components, and
 // wire the one dependency between them — the keyboard highlights whatever the
@@ -9,5 +10,7 @@ export const UI = {
         Keyboard.init(document.getElementById('keyboard'));
         ScalePicker.onChange((root, scale) => Keyboard.showScale(root, scale));
         ScalePicker.init(document.getElementById('scale-picker'));
+        SoundControls.init(document.getElementById('sound-controls'));
+
     },
 };

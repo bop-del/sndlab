@@ -155,3 +155,44 @@ h1 {
 /* The dot is the marker, so a pressed key must not keep showing one on top of
    its own colour. */
 .key--pressed::after { display: none; }
+
+/* ── Sound controls ───────────────────────────────────────────────────────── */
+
+.sound-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+}
+
+.sound-controls select {
+    font: inherit;
+    color: var(--fg);
+    background: #23232e;
+    border: 1px solid #33333f;
+    border-radius: 6px;
+    padding: .4rem .6rem;
+    cursor: pointer;
+}
+
+.control {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .875rem;
+    color: var(--muted);
+}
+
+.control input[type="range"] {
+    width: 120px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.sound-controls select:focus-visible,
+.control input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}

@@ -60,7 +60,11 @@ function serve() {
 function installAudioSpy() {
     const calls = [];
     const nodes = [];
-    window.audioSpy = { calls, nodes };
+    // The shared filter is built once and lives for the session, so its record
+    // is kept outside `nodes` — resetSpy() clears that log between checks, and
+    // would otherwise erase the only handle on a node that still exists.
+    const shared = {};
+    window.audioSpy = { calls, nodes, shared };
 
     const wrap = (Ctor) => {
         if (!Ctor) return;
@@ -92,6 +96,39 @@ function installAudioSpy() {
                     return origStop(...a);
                 };
                 return osc;
+            };
+        }
+
+        // The shared filter is the one node a slider moves after construction,
+        // so its automation has to be recorded too — otherwise "the cutoff
+        // changed while a note was held" is unobservable from outside, and the
+        // only alternative is a hook in shipped code.
+        const origFilter = proto.createBiquadFilter;
+        if (origFilter) {
+            proto.createBiquadFilter = function (...args) {
+                const node = origFilter.apply(this, args);
+                // A getter, not a snapshot. createBiquadFilter() returns with
+                // a default of 350 Hz and the engine assigns the real cutoff
+                // afterwards, so a value read here would be the default for
+                // ever — the same trap the oscillator wrapper avoids by reading
+                // at start().
+                const record = { node: 'filter', targets: [] };
+                Object.defineProperty(record, 'frequency', {
+                    get: () => node.frequency.value,
+                    enumerable: true,
+                });
+                nodes.push(record);
+                // First filter built is the shared one; the reverb's damping
+                // filter comes after and is not what the slider moves.
+                shared.filter ??= record;
+                calls.push('createBiquadFilter');
+
+                const orig = node.frequency.setTargetAtTime.bind(node.frequency);
+                node.frequency.setTargetAtTime = (value, ...rest) => {
+                    record.targets.push(value);
+                    return orig(value, ...rest);
+                };
+                return node;
             };
         }
 
@@ -130,6 +167,83 @@ function installAudioSpy() {
 // boundary UI.js will split on (see issue #3).
 
 const checks = [
+    {
+        name: 'a preset stacks several oscillators per note',
+        async run(page) {
+            // One oscillator is a test tone. Detuned copies beating against
+            // each other are most of what separates a synth from a beep, so a
+            // note falling back to a single layer is a regression in the sound
+            // even though it would still play the right pitch.
+            await resetSpy(page);
+            await press(page, '[data-note="60"]');
+            const voices = voicesIn(await audioSpy(page));
+            if (voices.length !== 1) throw new Error(`expected 1 voice, got ${voices.length}`);
+            if (voices[0].oscillators.length < 2) {
+                throw new Error(`expected a stacked voice, got ${voices[0].oscillators.length} oscillator`);
+            }
+            await release(page);
+        },
+    },
+    {
+        name: 'both presets are offered and can be selected',
+        async run(page) {
+            const presets = await page.$$eval('#preset option', (os) => os.map((o) => o.value));
+            if (presets.length < 2) throw new Error(`expected 2 presets, got ${presets.length}`);
+            await page.selectOption('#preset', presets[1]);
+            await page.selectOption('#preset', presets[0]);
+        },
+    },
+    {
+        name: 'the presets sound different from each other',
+        async run(page) {
+            // Two presets exist to separate "this sound is badly designed" from
+            // "the whole idea does not work". Two that behave identically would
+            // answer neither question.
+            const shapeOf = async (preset) => {
+                await page.selectOption('#preset', preset);
+                await resetSpy(page);
+                await press(page, '[data-note="60"]');
+                const [voice] = voicesIn(await audioSpy(page));
+                await release(page);
+                return { layers: voice.oscillators.length, types: voice.types.join(',') };
+            };
+            const pad = await shapeOf('pad');
+            const pluck = await shapeOf('pluck');
+            if (pad.layers === pluck.layers && pad.types === pluck.types) {
+                throw new Error(`the presets build the same voice: ${JSON.stringify(pad)}`);
+            }
+            await page.selectOption('#preset', 'pad');
+        },
+    },
+    {
+        name: 'the cutoff slider changes a note already sounding',
+        async run(page) {
+            // A filter you can only hear on the *next* note is a setting, not
+            // an instrument control. Sweeping under a held chord is the point.
+            await press(page, '[data-note="60"]');
+            const filterBefore = (await audioSpy(page)).shared.filter;
+            if (!filterBefore) throw new Error('no filter in the graph — voices run dry to the destination');
+            const before = filterBefore.frequency;
+
+            // The slider is a 0–1 position, not hertz — pitch is heard
+            // logarithmically, so the control is geometric over the range.
+            await page.fill('#cutoff', '0.1');
+            await page.dispatchEvent('#cutoff', 'input');
+            await new Promise((r) => setTimeout(r, 120));
+
+            const after = (await audioSpy(page)).shared.filter.frequency;
+            await release(page);
+
+            // Put the slider back. The screenshot is taken after every check
+            // runs, so a check that leaves a control moved makes the screenshot
+            // show the test's world rather than the app's.
+            await page.selectOption('#preset', 'pluck');
+            await page.selectOption('#preset', 'pad');
+
+            if (!(after < before)) throw new Error(`cutoff did not fall while a note was held: ${before} → ${after}`);
+        },
+    },
+
     {
         name: 'the scale picker offers both scales, with a why-sentence',
         async run(page) {
@@ -185,8 +299,7 @@ const checks = [
             await page.evaluate(() => { window.audioSpy.nodes.length = 0; window.audioSpy.calls.length = 0; });
             await press(page, '[data-note="66"]'); // F sharp, outside E Phrygian
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) throw new Error(`expected the out-of-scale note to sound, got ${started.length} voices`);
+            if (voicesIn(spy).length !== 1) throw new Error(`expected the out-of-scale note to sound, got ${voicesIn(spy).length} voices`);
             await release(page);
         },
     },
@@ -234,12 +347,12 @@ const checks = [
                 await ios.mouse.down();
 
                 const spy = await ios.evaluate(() => window.audioSpy);
-                const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-                if (started.length !== 1) {
-                    throw new Error(`expected the note to sound with only webkitAudioContext, got ${started.length} oscillators`);
+                const voices = voicesIn(spy);
+                if (voices.length !== 1) {
+                    throw new Error(`expected the note to sound with only webkitAudioContext, got ${voices.length} oscillators`);
                 }
-                if (Math.abs(started[0].frequency - 440) > 0.01) {
-                    throw new Error(`expected 440 Hz, got ${started[0].frequency}`);
+                if (Math.abs(voices[0].frequency - 440) > 0.01) {
+                    throw new Error(`expected 440 Hz, got ${voices[0].frequency}`);
                 }
                 await ios.mouse.up();
             } finally {
@@ -322,11 +435,13 @@ const checks = [
             await press(page, '[data-note="69"]');
             const spy = await audioSpy(page);
 
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) throw new Error(`expected 1 started oscillator, got ${started.length}`);
-            const [osc] = started;
-            if (Math.abs(osc.frequency - 440) > 0.01) throw new Error(`expected 440 Hz, got ${osc.frequency}`);
-            if (osc.type !== 'sawtooth') throw new Error(`expected sawtooth, got ${osc.type}`);
+            const voices = voicesIn(spy);
+            if (voices.length !== 1) throw new Error(`expected 1 voice, got ${voices.length}`);
+            const [voice] = voices;
+            // Rounded to the nearest hertz by voicesIn, since a preset's layers
+            // sit a few cents either side of the true pitch.
+            if (voice.frequency !== 440) throw new Error(`expected 440 Hz, got ${voice.frequency}`);
+            if (!voice.types.includes('sawtooth')) throw new Error(`expected a sawtooth layer, got ${voice.types.join(', ')}`);
 
             await release(page);
         },
@@ -339,10 +454,10 @@ const checks = [
             await page.keyboard.down('n');
             const spy = await audioSpy(page);
 
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) throw new Error(`expected 1 started oscillator, got ${started.length}`);
-            if (Math.abs(started[0].frequency - 440) > 0.01) {
-                throw new Error(`expected 440 Hz from the "n" key, got ${started[0].frequency}`);
+            const voices = voicesIn(spy);
+            if (voices.length !== 1) throw new Error(`expected 1 voice, got ${voices.length}`);
+            if (voices[0].frequency !== 440) {
+                throw new Error(`expected 440 Hz from the "n" key, got ${voices[0].frequency}`);
             }
 
             await page.keyboard.up('n');
@@ -359,9 +474,9 @@ const checks = [
 
             await release(page);
             spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) throw new Error(`expected 1 started oscillator, got ${started.length}`);
-            if (!started[0].stopped) throw new Error('releasing the key did not stop the oscillator');
+            const voices = voicesIn(spy);
+            if (voices.length !== 1) throw new Error(`expected 1 voice, got ${voices.length}`);
+            if (!voices[0].stopped) throw new Error('releasing the key did not stop the note');
         },
     },
     {
@@ -387,9 +502,9 @@ const checks = [
             await page.keyboard.down('z');
 
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) {
-                throw new Error(`three keydowns started ${started.length} oscillators, expected 1`);
+            const voices = voicesIn(spy);
+            if (voices.length !== 1) {
+                throw new Error(`three keydowns started ${voices.length} oscillators, expected 1`);
             }
 
             await page.keyboard.up('z');
@@ -405,8 +520,8 @@ const checks = [
             await page.evaluate(() => window.dispatchEvent(new Event('blur')));
 
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            const sounding = started.filter((n) => !n.stopped);
+            const voices = voicesIn(spy);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) still sounding after blur`);
 
             const lit = await page.$$('#keyboard .key--pressed');
@@ -426,7 +541,7 @@ const checks = [
             await page.keyboard.down(' ');
 
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 1) throw new Error(`expected 1 live oscillator, got ${sounding.length}`);
             if (Math.abs(sounding[0].frequency - 392) > 0.5) {
                 throw new Error(`expected ~392 Hz (G4), got ${sounding[0].frequency}`);
@@ -452,7 +567,7 @@ const checks = [
             if (lit.length !== 0) throw new Error(`${lit.length} key(s) stuck lit after focus moved mid-hold`);
 
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) still sounding`);
 
             await page.evaluate(() => document.activeElement.blur());
@@ -468,7 +583,7 @@ const checks = [
 
             if (!(await isLit(page, 60))) throw new Error('the note went dark while "z" was still down');
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 1) throw new Error(`expected the note to keep sounding, got ${sounding.length} live`);
 
             await page.keyboard.up('z');
@@ -486,8 +601,8 @@ const checks = [
 
             await page.keyboard.down(' ');
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 0) throw new Error(`space replayed the clicked key (${started.length} oscillator)`);
+            const voices = voicesIn(spy);
+            if (voices.length !== 0) throw new Error(`space replayed the clicked key (${voices.length} voices)`);
             await page.keyboard.up(' ');
         },
     },
@@ -566,7 +681,7 @@ const checks = [
             await page.keyboard.down('b'); // G4
 
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 3) throw new Error(`expected 3 live oscillators, got ${sounding.length}`);
 
             const frequencies = sounding.map((n) => Math.round(n.frequency));
@@ -597,10 +712,10 @@ const checks = [
             });
 
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 1) throw new Error(`expected 1 oscillator from the physical Z key, got ${started.length}`);
-            if (Math.abs(started[0].frequency - 262) > 1) {
-                throw new Error(`the physical Z key should play C4 (~262 Hz), got ${started[0].frequency}`);
+            const voices = voicesIn(spy);
+            if (voices.length !== 1) throw new Error(`expected 1 voice from the physical Z key, got ${voices.length}`);
+            if (Math.abs(voices[0].frequency - 262) > 1) {
+                throw new Error(`the physical Z key should play C4 (~262 Hz), got ${voices[0].frequency}`);
             }
             if (!(await isLit(page, 60))) throw new Error('the C4 key is not lit');
 
@@ -619,7 +734,7 @@ const checks = [
             await page.keyboard.down('u'); // B5
 
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 2) throw new Error(`expected 2 live oscillators, got ${sounding.length}`);
             const frequencies = sounding.map((n) => Math.round(n.frequency));
             for (const expected of [523, 988]) { // C5, B5
@@ -673,9 +788,9 @@ const checks = [
             if (lit.length !== 0) throw new Error(`${lit.length} key(s) stuck lit after both fingers lifted`);
 
             const spy = await audioSpy(page);
-            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
-            if (started.length !== 2) throw new Error(`expected 2 notes from 2 fingers, got ${started.length}`);
-            const sounding = started.filter((n) => !n.stopped);
+            const voices = voicesIn(spy);
+            if (voices.length !== 2) throw new Error(`expected 2 notes from 2 fingers, got ${voices.length}`);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
             if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) sounding after both fingers lifted`);
         },
     },
@@ -713,6 +828,28 @@ const checks = [
 
 async function audioSpy(page) {
     return page.evaluate(() => window.audioSpy);
+}
+
+// A note is several oscillators, not one: a preset stacks detuned copies, which
+// is most of what separates a synth from a test tone. Checks care how many
+// *notes* are sounding, so they count distinct pitches — that stays true however
+// many layers a preset grows.
+function voicesIn(spy) {
+    const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+    const byPitch = new Map();
+    for (const osc of started) {
+        // Round: detuned layers sit a few cents either side of the true pitch.
+        const pitch = Math.round(osc.frequency);
+        if (!byPitch.has(pitch)) byPitch.set(pitch, []);
+        byPitch.get(pitch).push(osc);
+    }
+    return [...byPitch.entries()].map(([frequency, oscillators]) => ({
+        frequency,
+        oscillators,
+        // The waveforms a preset stacked for this note.
+        types: [...new Set(oscillators.map((o) => o.type))],
+        stopped: oscillators.every((o) => o.stopped),
+    }));
 }
 
 async function resetSpy(page) {
