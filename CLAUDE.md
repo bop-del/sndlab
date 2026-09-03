@@ -154,6 +154,22 @@ If a card sits in `In progress` with a clean tree and nothing pushed, that
 session died; the card is yours. Mechanics and `gh` commands:
 `docs/agents/issue-tracker.md`.
 
+### Filing an issue
+
+**File what you found. Propose what you think.**
+
+Found a defect in code that already works — a regression, something the checks
+missed, a bug visible in a screenshot? File it: one `kind` label, plus
+`unconfirmed` because you inferred it rather than watched Boris hit it. Put it
+in `Needs decision`, and **say so in your response**, in one line, with why. An
+issue filed silently is a surprise later.
+
+Improvements, refactors and "we should eventually" ideas are opinions about the
+product. They belong to Boris — mention them, file only if asked. A second
+filing in one session means you are drifting from the task; ask first.
+
+Labels: `docs/agents/triage-labels.md`.
+
 ## Agent skills
 
 ### Issue tracker
