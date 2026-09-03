@@ -71,7 +71,10 @@ export const AudioEngine = {
         return voice;
     },
 
-    // Release everything currently sounding — the window-blur safety net.
+    // Silence everything currently sounding. The engine's own last resort: it
+    // knows nothing about who was holding what, so a caller tracking notes must
+    // clear its own state first or it will be left showing keys that no longer
+    // sound. Keyboard.releaseAll() does exactly that.
     stopAll() {
         for (const voice of [...this.voices]) voice.stop();
     },

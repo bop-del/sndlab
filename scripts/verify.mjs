@@ -270,6 +270,59 @@ const checks = [
         },
     },
     {
+        name: 'a focused key released after focus moves does not stick',
+        async run(page) {
+            // Resolving the note from activeElement at keyup released the wrong
+            // note and left the real one sounding until a reload.
+            await page.focus('[data-note="67"]');
+            await page.keyboard.down(' ');
+            await page.keyboard.press('Tab');
+            await page.keyboard.up(' ');
+
+            const lit = await page.$$('#keyboard .key--pressed');
+            if (lit.length !== 0) throw new Error(`${lit.length} key(s) stuck lit after focus moved mid-hold`);
+
+            const spy = await audioSpy(page);
+            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) still sounding`);
+
+            await page.evaluate(() => document.activeElement.blur());
+        },
+    },
+    {
+        name: 'a mouse release does not cut a note the keyboard still holds',
+        async run(page) {
+            // Both paths share one note; the last holder to let go stops it.
+            await page.keyboard.down('z'); // C4
+            await press(page, '[data-note="60"]');
+            await release(page);
+
+            if (!(await isLit(page, 60))) throw new Error('the note went dark while "z" was still down');
+            const spy = await audioSpy(page);
+            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            if (sounding.length !== 1) throw new Error(`expected the note to keep sounding, got ${sounding.length} live`);
+
+            await page.keyboard.up('z');
+            if (await isLit(page, 60)) throw new Error('the note stayed lit after the last holder released');
+        },
+    },
+    {
+        name: 'space after a click does not replay the clicked key',
+        async run(page) {
+            // Space is the panic reflex on an instrument: it must not sound the
+            // last key the mouse touched.
+            await press(page, '[data-note="60"]');
+            await release(page);
+            await resetSpy(page);
+
+            await page.keyboard.down(' ');
+            const spy = await audioSpy(page);
+            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (started.length !== 0) throw new Error(`space replayed the clicked key (${started.length} oscillator)`);
+            await page.keyboard.up(' ');
+        },
+    },
+    {
         name: 'three keys held at once produce three live voices',
         async run(page) {
             await page.keyboard.down('z'); // C4
