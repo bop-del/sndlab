@@ -133,6 +133,22 @@ const checks = [
         },
     },
     {
+        name: 'the keyboard is there on a plain load, with no waiting',
+        async run(page) {
+            // Every other check runs against a page already settled by
+            // `networkidle`, which would hide init that never happened on an
+            // ordinary load. This one asks immediately, on a fresh page.
+            const fresh = await browser.newPage();
+            try {
+                await fresh.goto(`http://localhost:${PORT}/`, { waitUntil: 'load' });
+                const keys = await fresh.$$eval('#keyboard .key', (els) => els.length);
+                if (keys !== 25) throw new Error(`expected 25 keys immediately after load, got ${keys}`);
+            } finally {
+                await fresh.close();
+            }
+        },
+    },
+    {
         name: 'the keyboard renders two octaves of keys',
         async run(page) {
             // A dead listener is the classic no-build failure: the module 404s
