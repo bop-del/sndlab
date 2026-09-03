@@ -145,7 +145,7 @@ Issues say *what*; the board says *where it has got to*. Sessions do not share
 memory, so the board is how one knows what another is already building.
 
 ```
-Needs decision → Ready → In progress → Needs review → Done
+Ideas → Needs decision → Ready → In progress → Needs review → Done
 ```
 
 Three rules, in order of how much damage breaking them does:

@@ -32,6 +32,7 @@ they cannot disagree. See `triage-labels.md`.
 
 | Status | Meaning | Next action |
 |---|---|---|
+| **Ideas** | A candidate, not a commitment. Nobody has judged whether it is worth doing. | Boris |
 | **Needs decision** | Scope is not settled. No agent should build this. | `/grill-with-docs` |
 | **Ready** | Spec written. An agent can take it cold. | `/implement` |
 | **In progress** | Claimed by a session. Do not pick this up. | — |
@@ -48,7 +49,9 @@ they cannot disagree. See `triage-labels.md`.
   at the screenshot. An agent closing out its own work is the failure the
   verification rule in `CLAUDE.md` exists to prevent.
 - **Every card is a real issue.** No draft items — a draft is a second source of
-  truth that `gh issue list` cannot see.
+  truth that `gh issue list` cannot see. This applies to `Ideas` too: the cost is
+  that `gh issue list` returns candidates alongside real work, which is accepted
+  for the sake of ideas being visible on the board where they are actually seen.
 - **A stale claim can be taken.** If a card sits in `In progress` with a clean
   working tree and nothing pushed, the session that claimed it died. Take it.
 
@@ -74,18 +77,33 @@ gh project item-edit --id <item id> \
 
 | Status | Option id |
 |---|---|
-| Needs decision | `a6332e64` |
-| Ready | `86f0d5b1` |
-| In progress | `5faec826` |
-| Needs review | `52c3e954` |
-| Done | `550dce74` |
+| Ideas | `bbc9b844` |
+| Needs decision | `44aac772` |
+| Ready | `1f7975a3` |
+| In progress | `ceee39b4` |
+| Needs review | `742ad5c3` |
+| Done | `3519a961` |
 
-These ids are stable — use them directly rather than re-deriving them. If one is
-rejected the field was edited by hand; re-read it with
-`gh project field-list 2 --owner bop-del --format json` and fix this table.
+Use these directly rather than re-deriving them. If one is rejected, re-read the
+field and fix this table:
+`gh project field-list 2 --owner bop-del --format json`.
 
-`gh` cannot change the *set* of options — that needs the GraphQL
-`updateProjectV2Field` mutation, which replaces all options at once.
+**Adding or renaming a column resets every id and clears every card.** `gh`
+cannot change the *set* of options; that needs the GraphQL
+`updateProjectV2Field` mutation, which replaces all options at once — and
+replacing them mints **new ids for every option, including untouched ones**, so
+every card loses its status and this table goes stale in the same move. Adding
+`Ideas` did exactly that.
+
+If you must change the set:
+
+1. Snapshot first — `gh project item-list 2 --owner bop-del --format json` and
+   keep the item id → status mapping.
+2. Send the **full** option list, existing entries included, with their
+   descriptions and colours.
+3. Re-read the field, update the id table above.
+4. Restore every card from the snapshot, then diff against it to prove nothing
+   was lost.
 
 **A new item takes a while to appear.** `gh project item-add` returns the item
 id immediately, but the item can be missing from reads — CLI *and* GraphQL — for

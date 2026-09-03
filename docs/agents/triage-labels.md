@@ -57,7 +57,13 @@ one line, with why. An issue filed silently is a surprise later.
 
 An agent does **not** file improvements, refactors, or "we should eventually"
 ideas. Those are opinions about the product, and they belong to Boris. Mention
-them in the response; file only if asked.
+them in the response; file only if asked. The `Ideas` column is where they go
+**when asked** — it is not an invitation to fill it unprompted.
+
+**A finding attached to existing work is a comment, not a card.** A contingency,
+a piece of research, a "if this turns out badly, consider that" — put it on the
+issue it concerns, where whoever hits that problem will actually be looking. As a
+standalone card it is an orphan nobody reads.
 
 A second filing in one session is a signal the agent is drifting from its task.
 Mention it and let Boris decide.
