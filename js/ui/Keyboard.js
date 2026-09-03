@@ -1,4 +1,4 @@
-import { AudioEngine } from '../audio/AudioEngine.js';
+import { Notes } from '../audio/Notes.js';
 
 // Two octaves, C to C. MIDI 60 is middle C.
 const FIRST_NOTE = 60;
@@ -28,16 +28,11 @@ const KEY_TO_NOTE = new Map();
 for (const [i, code] of LOWER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + i);
 for (const [i, code] of UPPER_ROW.entries()) KEY_TO_NOTE.set(code, FIRST_NOTE + 12 + i);
 
+// Note ownership lives in Notes: the keyboard is one source among several, and
+// the chord pads and drone hold notes on the same terms. What stays here is the
+// keyboard's own business — its keys, their lit state, and its two input paths.
 export const Keyboard = {
-    // One source of truth for what is sounding: MIDI number → voice handle.
-    // Two stores is where "key stuck lit after mouse-out" lives.
-    held: new Map(),
     keys: new Map(), // MIDI number → element
-
-    // Who is holding each sounding note. A note is released only when the last
-    // holder lets go, so clicking a note the computer keyboard is already
-    // holding does not cut it short when the mouse comes up.
-    holders: new Map(), // MIDI number → Set of owner tokens
 
     // What each input path grabbed, so a release stops the note that was
     // actually pressed. Resolving it again at release time is wrong: focus can
@@ -55,6 +50,12 @@ export const Keyboard = {
         this.render(container);
         this.bindPointer(container);
         this.bindComputerKeyboard();
+
+        // Light the key whoever started the note — a note played by a chord pad
+        // shows on the keyboard too, which is the point of one shared store.
+        Notes.onChange((midiNumber, sounding) => {
+            this.keys.get(midiNumber)?.classList.toggle('key--pressed', sounding);
+        });
 
         // A lost keyup — switching away mid-hold — otherwise leaves a note
         // sounding until reload.
@@ -93,46 +94,19 @@ export const Keyboard = {
     },
 
     press(midiNumber, owner) {
-        const holders = this.holders.get(midiNumber) ?? new Set();
-        holders.add(owner);
-        this.holders.set(midiNumber, holders);
-
-        // Already sounding — a key repeat, or the other input path got here
-        // first. The note keeps playing; this owner just joins the holders.
-        if (this.held.has(midiNumber)) return;
-
-        this.held.set(midiNumber, AudioEngine.noteOn(midiNumber));
-        this.keys.get(midiNumber)?.classList.add('key--pressed');
+        Notes.press(midiNumber, owner);
     },
 
     release(midiNumber, owner) {
-        const holders = this.holders.get(midiNumber);
-        if (holders) {
-            holders.delete(owner);
-            // Someone else is still holding it — nothing to stop yet.
-            if (holders.size > 0) return;
-            this.holders.delete(midiNumber);
-        }
-
-        const voice = this.held.get(midiNumber);
-        if (!voice) return;
-        this.held.delete(midiNumber);
-        voice.stop();
-        this.keys.get(midiNumber)?.classList.remove('key--pressed');
+        Notes.release(midiNumber, owner);
     },
 
-    // Drop every note, whoever is holding it: the blur safety net, where the
-    // browser will deliver no keyup at all. Clears the UI's own state first,
-    // then lets the engine silence anything still sounding.
+    // The blur safety net. Clears this view's own per-input state, then drops
+    // every note however it was started — including any held by a chord pad.
     releaseAll() {
-        for (const midiNumber of [...this.held.keys()]) {
-            this.holders.delete(midiNumber);
-            this.release(midiNumber);
-        }
-        this.holders.clear();
         this.pointerNotes.clear();
         this.activationNotes.clear();
-        AudioEngine.stopAll();
+        Notes.releaseAll();
     },
 
     bindPointer(container) {
