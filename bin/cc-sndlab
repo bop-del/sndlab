@@ -2,11 +2,19 @@
 
 # Open sndlab in Claude Code with the engineering skills loaded.
 # Usage: cc-sndlab [claude arguments...]
+#
+# Sourced by the cc-sndlab shell function in ~/.zshrc, so that the `cd`
+# survives Claude exiting. Also runnable directly (./bin/cc-sndlab), in which
+# case the cd applies only to the subshell.
 
 REPO="$HOME/code/sndlab"
 SKILLS="$HOME/code/mattpocock-skills"
 
-cd "$REPO" || { echo "✗ $REPO not found"; exit 1; }
+if ! cd "$REPO"; then
+  echo "✗ $REPO not found"
+  # `return` when sourced, `exit` when run directly — exit would close the shell.
+  return 1 2>/dev/null || exit 1
+fi
 
 # GitHub account — bop-del, not the HeyJobs one
 if command -v gh > /dev/null 2>&1; then
@@ -30,4 +38,7 @@ else
 fi
 
 echo ""
-exec claude "$@"
+
+# `command claude`, not `exec` — this file is sourced, and exec would replace
+# the interactive shell instead of returning to it.
+command claude "$@"
