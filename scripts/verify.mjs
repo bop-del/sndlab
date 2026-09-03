@@ -156,13 +156,9 @@ const checks = [
     {
         name: 'the engine works where only webkitAudioContext exists',
         async run(page, browser) {
-            // Issue #5: older iOS ships only the prefixed constructor, so the
-            // unprefixed name was a ReferenceError thrown inside pointerdown —
-            // silent, with nothing shown. Every browser on iOS is WebKit, so
-            // this took out the whole platform while the checks stayed green.
-            //
-            // Simulated rather than waited for: Playwright's WebKit is modern
-            // and has both spellings, so only removing one reproduces the phone.
+            // Older WebKit ships only the prefixed constructor. Current iOS has
+            // the unprefixed one — so this is defensive, not the cause of #5;
+            // that turned out to be the resume race checked above.
             const ios = await browser.newPage();
             try {
                 await ios.addInitScript(installAudioSpy);
@@ -185,6 +181,60 @@ const checks = [
                     throw new Error(`expected 440 Hz, got ${started[0].frequency}`);
                 }
                 await ios.mouse.up();
+            } finally {
+                await ios.close();
+            }
+        },
+    },
+    {
+        name: 'a note is scheduled where a late-resuming context can hear it',
+        async run(page, browser) {
+            // Issue #5. iOS creates the context suspended and resume() settles a
+            // tick later; a suspended context's clock is frozen at 0. Scheduling
+            // the envelope at that frozen time puts the note before audio starts
+            // flowing, so it is never heard — silent, with no error anywhere.
+            // Desktop resumes fast enough to hide it entirely.
+            const ios = await browser.newPage();
+            try {
+                await ios.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
+                const result = await ios.evaluate(async () => {
+                    const { AudioEngine } = await import('/js/audio/AudioEngine.js?' + Math.random());
+                    const RESUME_DELAY = 0.12;
+
+                    const Real = window.AudioContext;
+                    window.AudioContext = class extends Real {
+                        constructor(...args) {
+                            super(...args);
+                            this._resumed = false;
+                            const realResume = super.resume.bind(this);
+                            Object.defineProperty(this, 'state', { get: () => (this._resumed ? 'running' : 'suspended') });
+                            Object.defineProperty(this, 'currentTime', {
+                                get: () => (this._resumed ? Real.prototype.__lookupGetter__('currentTime').call(this) : 0),
+                            });
+                            this.resume = () => {
+                                setTimeout(() => { this._resumed = true; }, RESUME_DELAY * 1000);
+                                return realResume();
+                            };
+                        }
+                    };
+
+                    let scheduledAt = null;
+                    const origSet = AudioParam.prototype.setValueAtTime;
+                    AudioParam.prototype.setValueAtTime = function (value, time) {
+                        if (scheduledAt === null) scheduledAt = time;
+                        return origSet.call(this, value, time);
+                    };
+                    AudioEngine.noteOn(69);
+                    AudioParam.prototype.setValueAtTime = origSet;
+                    return { scheduledAt, resumeDelay: RESUME_DELAY };
+                });
+
+                if (result.scheduledAt === null) throw new Error('the envelope was never scheduled');
+                if (result.scheduledAt <= 0) {
+                    throw new Error(
+                        `the note is scheduled at ${result.scheduledAt}s, inside the frozen window before audio starts — it would never be heard`,
+                    );
+                }
             } finally {
                 await ios.close();
             }

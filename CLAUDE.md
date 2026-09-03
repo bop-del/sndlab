@@ -84,13 +84,11 @@ A green run with an unexamined screenshot is not a verification — the checks
 cannot see layout, contrast or alignment. Look at the image and say what is
 wrong with it.
 
-Every check runs against **both Chromium and WebKit**. Chromium alone let a
-WebKit-only bug ship once (issue #5): the engine built an unprefixed
-`AudioContext`, which older iOS does not have, so the app was silent on every
-browser on the platform — they are all WebKit underneath — while the checks
-stayed green. Playwright's WebKit is not Safari-on-iOS and does not enforce its
-stricter gesture rules, so a real device is still the last word; it is much
-closer than Chromium, and it would have caught that one.
+Every check runs against **both Chromium and WebKit**, because the desktop is not
+the target. Even so, Playwright's WebKit is current Safari, not the phone: issue
+#5 was silent on iOS while every check stayed green on both engines, and it took
+a diagnostic page run on the actual device to find it. **A real phone is the only
+proof for anything mobile.**
 
 Two things the run deliberately does not do, so they stay yours:
 
