@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = 8123; // deliberately not 8000 — the dev server keeps that one
@@ -115,8 +115,13 @@ function installAudioSpy() {
         }
     };
 
+    // Both spellings: on WebKit the engine may construct the prefixed one, and a
+    // spy that watches only the unprefixed name would record nothing while the
+    // app worked fine — reporting a failure that is entirely its own.
     wrap(window.AudioContext);
+    wrap(window.webkitAudioContext);
     wrap(window.OfflineAudioContext);
+    wrap(window.webkitOfflineAudioContext);
 }
 
 // ─── Checks ──────────────────────────────────────────────────────────────────
@@ -134,7 +139,7 @@ const checks = [
     },
     {
         name: 'the keyboard is there on a plain load, with no waiting',
-        async run(page) {
+        async run(page, browser) {
             // Every other check runs against a page already settled by
             // `networkidle`, which would hide init that never happened on an
             // ordinary load. This one asks immediately, on a fresh page.
@@ -145,6 +150,43 @@ const checks = [
                 if (keys !== 25) throw new Error(`expected 25 keys immediately after load, got ${keys}`);
             } finally {
                 await fresh.close();
+            }
+        },
+    },
+    {
+        name: 'the engine works where only webkitAudioContext exists',
+        async run(page, browser) {
+            // Issue #5: older iOS ships only the prefixed constructor, so the
+            // unprefixed name was a ReferenceError thrown inside pointerdown —
+            // silent, with nothing shown. Every browser on iOS is WebKit, so
+            // this took out the whole platform while the checks stayed green.
+            //
+            // Simulated rather than waited for: Playwright's WebKit is modern
+            // and has both spellings, so only removing one reproduces the phone.
+            const ios = await browser.newPage();
+            try {
+                await ios.addInitScript(installAudioSpy);
+                await ios.addInitScript(() => {
+                    window.webkitAudioContext = window.AudioContext;
+                    delete window.AudioContext;
+                });
+                await ios.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
+
+                const box = await (await ios.$('[data-note="69"]')).boundingBox();
+                await ios.mouse.move(box.x + box.width / 2, box.y + box.height - 8);
+                await ios.mouse.down();
+
+                const spy = await ios.evaluate(() => window.audioSpy);
+                const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+                if (started.length !== 1) {
+                    throw new Error(`expected the note to sound with only webkitAudioContext, got ${started.length} oscillators`);
+                }
+                if (Math.abs(started[0].frequency - 440) > 0.01) {
+                    throw new Error(`expected 440 Hz, got ${started[0].frequency}`);
+                }
+                await ios.mouse.up();
+            } finally {
+                await ios.close();
             }
         },
     },
@@ -499,28 +541,30 @@ const checks = [
             // A single pointer slot lost the first press, stranding its note
             // sounding for good — the app's worst failure mode, and the default
             // way anyone plays a chord on a touchscreen.
-            const at = async (selector) => {
-                const box = await (await page.$(selector)).boundingBox();
-                return { x: box.x + box.width / 2, y: box.y + box.height - 8 };
-            };
-            const first = await at('[data-note="60"]');
-            const second = await at('[data-note="64"]');
+            //
+            // Dispatched as real PointerEvents rather than driven through CDP:
+            // CDP is Chromium-only, and this must run on WebKit too, which is
+            // the engine every iOS browser actually uses.
+            await page.evaluate(() => {
+                const fire = (target, type, pointerId) => target.dispatchEvent(
+                    new PointerEvent(type, { pointerId, pointerType: 'touch', bubbles: true, cancelable: true }),
+                );
+                const first = document.querySelector('[data-note="60"]');
+                const second = document.querySelector('[data-note="64"]');
 
-            const cdp = await page.context().newCDPSession(page);
-            const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
-            // In CDP, touchEnd carries the points being LIFTED, not the ones
-            // that remain. So this lifts finger 1, then finger 2.
-            await send('touchStart', [{ ...first, id: 1 }]);
-            await send('touchStart', [{ ...first, id: 1 }, { ...second, id: 2 }]);
-            await send('touchEnd', [{ ...first, id: 1 }]);
-            await send('touchEnd', [{ ...second, id: 2 }]);
-            await cdp.detach();
+                fire(first, 'pointerdown', 1);
+                fire(second, 'pointerdown', 2);
+                fire(document, 'pointerup', 1); // lift the first finger
+                fire(document, 'pointerup', 2); // then the second
+            });
 
             const lit = await page.$$('#keyboard .key--pressed');
             if (lit.length !== 0) throw new Error(`${lit.length} key(s) stuck lit after both fingers lifted`);
 
             const spy = await audioSpy(page);
-            const sounding = spy.nodes.filter((n) => n.node === 'oscillator' && n.started && !n.stopped);
+            const started = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (started.length !== 2) throw new Error(`expected 2 notes from 2 fingers, got ${started.length}`);
+            const sounding = started.filter((n) => !n.stopped);
             if (sounding.length !== 0) throw new Error(`${sounding.length} note(s) sounding after both fingers lifted`);
         },
     },
@@ -589,12 +633,41 @@ async function isLit(page, midiNumber) {
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
+// Every check runs against both engines. Chromium alone let a WebKit-only bug
+// ship: the engine constructed an unprefixed AudioContext, which does not exist
+// on older iOS, so the app was silent on every browser on the platform (they are
+// all WebKit underneath) while the checks stayed green. See issue #5.
+//
+// Playwright's WebKit is not Safari-on-iOS — it does not enforce iOS's stricter
+// gesture rules for audio — so a real device stays the final word. It is much
+// closer than Chromium, and it would have caught that bug.
+
+const ENGINES = [
+    { name: 'chromium', launch: chromium, screenshots: true },
+    // Screenshots come from one engine only: two sets of the same layout is
+    // twice the images and no more information.
+    { name: 'webkit', launch: webkit, screenshots: false },
+];
 
 const server = await serve();
-const browser = await chromium.launch();
 let failures = 0;
 
 try {
+    for (const engine of ENGINES) {
+        console.log(`\n  ${engine.name}`);
+        const browser = await engine.launch.launch();
+        try {
+            failures += await runChecks(browser, engine);
+        } finally {
+            await browser.close();
+        }
+    }
+} finally {
+    server.close();
+}
+
+async function runChecks(browser, engine) {
+    let failed = 0;
     const page = await browser.newPage();
 
     // Level 1: anything the page says about itself. Collected for the whole run,
@@ -611,48 +684,50 @@ try {
     for (const check of checks) {
         try {
             await resetSpy(page);
-            await check.run(page);
-            console.log(`  ok    ${check.name}`);
+            await check.run(page, browser);
+            console.log(`    ok    ${check.name}`);
         } catch (err) {
-            failures++;
-            console.log(`  FAIL  ${check.name}\n          ${err.message}`);
+            failed++;
+            console.log(`    FAIL  ${check.name}\n            ${err.message}`);
         }
     }
 
     if (consoleErrors.length) {
-        failures++;
-        console.log(`  FAIL  console is clean\n${consoleErrors.map((e) => `          ${e}`).join('\n')}`);
+        failed++;
+        console.log(`    FAIL  console is clean\n${consoleErrors.map((e) => `            ${e}`).join('\n')}`);
     } else {
-        console.log('  ok    console is clean');
+        console.log('    ok    console is clean');
     }
 
     if (failedRequests.length) {
-        failures++;
-        console.log(`  FAIL  all requests resolved\n${failedRequests.map((r) => `          ${r}`).join('\n')}`);
+        failed++;
+        console.log(`    FAIL  all requests resolved\n${failedRequests.map((r) => `            ${r}`).join('\n')}`);
     } else {
-        console.log('  ok    all requests resolved');
+        console.log('    ok    all requests resolved');
     }
 
-    // Level 5: taken unconditionally, pass or fail. A visual check that only
-    // runs on demand is one that gets skipped exactly when it matters.
-    await mkdir(SHOTS, { recursive: true });
+    if (engine.screenshots) {
+        // Level 5: taken unconditionally, pass or fail. A visual check that only
+        // runs on demand is one that gets skipped exactly when it matters.
+        await mkdir(SHOTS, { recursive: true });
 
-    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-    const idle = join(SHOTS, 'app.png');
-    await page.screenshot({ path: idle, fullPage: true });
+        await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+        const idle = join(SHOTS, 'app.png');
+        await page.screenshot({ path: idle, fullPage: true });
 
-    // The pressed state is where misalignment and an invisible active state
-    // actually show, so the chord is the shot worth looking at hardest.
-    for (const key of ['z', 'c', 'b']) await page.keyboard.down(key);
-    const chord = join(SHOTS, 'app-chord.png');
-    await page.screenshot({ path: chord, fullPage: true });
-    for (const key of ['z', 'c', 'b']) await page.keyboard.up(key);
+        // The pressed state is where misalignment and an invisible active state
+        // actually show, so the chord is the shot worth looking at hardest.
+        for (const key of ['z', 'c', 'b']) await page.keyboard.down(key);
+        const chord = join(SHOTS, 'app-chord.png');
+        await page.screenshot({ path: chord, fullPage: true });
+        for (const key of ['z', 'c', 'b']) await page.keyboard.up(key);
 
-    console.log(`\n  screenshots → ${idle.replace(ROOT, '')}, ${chord.replace(ROOT, '')}`);
-    console.log('                (look at them — it is not verified until you have)');
-} finally {
-    await browser.close();
-    server.close();
+        console.log(`\n  screenshots → ${idle.replace(ROOT, '')}, ${chord.replace(ROOT, '')}`);
+        console.log('                (look at them — it is not verified until you have)');
+    }
+
+    await page.close();
+    return failed;
 }
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);

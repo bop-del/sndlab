@@ -69,7 +69,7 @@ A **verification run** drives a real headless browser and checks the app against
 every **check**:
 
 ```bash
-npm install          # once — Playwright + Chromium
+npm install          # once — Playwright + Chromium and WebKit
 node scripts/verify.mjs
 ```
 
@@ -83,6 +83,14 @@ run, pass or fail.
 A green run with an unexamined screenshot is not a verification — the checks
 cannot see layout, contrast or alignment. Look at the image and say what is
 wrong with it.
+
+Every check runs against **both Chromium and WebKit**. Chromium alone let a
+WebKit-only bug ship once (issue #5): the engine built an unprefixed
+`AudioContext`, which older iOS does not have, so the app was silent on every
+browser on the platform — they are all WebKit underneath — while the checks
+stayed green. Playwright's WebKit is not Safari-on-iOS and does not enforce its
+stricter gesture rules, so a real device is still the last word; it is much
+closer than Chromium, and it would have caught that one.
 
 Two things the run deliberately does not do, so they stay yours:
 

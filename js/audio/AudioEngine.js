@@ -22,9 +22,17 @@ export const AudioEngine = {
     voices: new Set(),
 
     // Create the AudioContext on a user gesture only (autoplay policy).
+    //
+    // WebKit still ships the prefixed constructor, and older iOS ships *only*
+    // that one — so on an iPhone the unprefixed name is a ReferenceError thrown
+    // inside the pointerdown handler, and the app is silent with nothing shown.
+    // Every browser on iOS is WebKit underneath, so this is not a Safari-only
+    // concern.
     ensureContext() {
         if (!this.ctx) {
-            this.ctx = new AudioContext();
+            const Ctor = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+            if (!Ctor) throw new Error('Web Audio is not available in this browser');
+            this.ctx = new Ctor();
         }
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
