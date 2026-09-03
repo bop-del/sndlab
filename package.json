@@ -1,0 +1,12 @@
+{
+  "name": "sndlab",
+  "private": true,
+  "type": "module",
+  "description": "Dev tooling only. Nothing here ships — see docs/adr/0004-dev-dependencies.md",
+  "scripts": {
+    "verify": "node scripts/verify.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

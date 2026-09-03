@@ -30,6 +30,8 @@ than inventing synonyms.
 | **Patch** | The complete sound setting — every parameter of an instrument. The thing you want to share and restore. |
 | **State-in-URL** | A patch (and later a pattern) is encoded into the URL hash so sharing works without a backend. See `docs/adr/0003-url-as-state.md`. |
 | **Engine** | `js/audio/AudioEngine.js` — the layer that wraps Web Audio. The UI calls the engine, never Web Audio directly. |
+| **Check** | One claim about the running app that either holds or fails — a note plays at the right pitch, the console is clean. |
+| **Verification run** | One pass over every check against a real browser, ending in a screenshot. The evidence behind "it works". |
 
 ## Boundaries
 

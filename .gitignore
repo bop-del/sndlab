@@ -3,3 +3,6 @@ node_modules/
 
 # Work tooling regenerates this on every session start — keep it out of a public repo
 .claude/
+
+# Verification-run screenshots — taken every run, assessed by eye, never a baseline
+.screenshots/

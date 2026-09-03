@@ -65,14 +65,37 @@ docs/
 
 ## Verification
 
-There is no test suite. Verification means:
+A **verification run** drives a real headless browser and checks the app against
+every **check**:
 
-1. `python3 -m http.server 8000`, open the page, trigger the interaction
-2. Listen for sound / check the console for errors (`Cmd+Opt+J`)
-3. `bin/setup` for the deploy chain
+```bash
+npm install          # once — Playwright + Chromium
+node scripts/verify.mjs
+```
 
-**Never claim "it works" without having seen it in the browser.**
-HTTP 200 proves delivery, not sound.
+It serves the repo on port 8123 (the dev server keeps 8000, so both run at
+once), then asserts: the page loads, every request resolves, the console is
+clean, the DOM responds, and the audio graph is right — an oscillator started at
+the expected frequency and waveform. It writes `.screenshots/app.png` on every
+run, pass or fail.
+
+**Nothing is verified until that passes and the screenshot has been looked at.**
+A green run with an unexamined screenshot is not a verification — the checks
+cannot see layout, contrast or alignment. Look at the image and say what is
+wrong with it.
+
+Two things the run deliberately does not do, so they stay yours:
+
+- **It does not prove sound came out.** It proves the right oscillator started.
+  Whether it sounds good is a human judgement — spot-check by ear before merging
+  anything that changes the engine.
+- **It does not compare against a baseline.** The screenshot is for assessment,
+  not pixel regression. See `docs/adr/0004-dev-dependencies.md`.
+
+`bin/setup` covers the deploy chain separately.
+
+Adding a feature means adding its checks to `scripts/verify.mjs`. Dev tooling
+lives under `scripts/`; shipped code stays dependency-free (ADR 0004).
 
 ## Deploy
 
