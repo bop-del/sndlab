@@ -50,12 +50,13 @@ export const Keyboard = {
     // move mid-hold, and then the wrong note gets released and the real one
     // sticks.
     //
-    // Both are keyed rather than single slots, because both can hold several
-    // notes at once: two fingers on a touchscreen, or Space and Enter together.
-    // A single slot loses the first press and strands its note, sounding, for
-    // good.
+    // Each is keyed rather than a single slot, because each can hold several
+    // notes at once: two fingers on a touchscreen, Space and Enter together,
+    // two row keys under two fingers. A single slot loses the first press and
+    // strands its note, sounding, for good.
     pointerNotes: new Map(), // pointerId → MIDI number
     activationNotes: new Map(), // KeyboardEvent.code → MIDI number
+    rowNotes: new Map(), // KeyboardEvent.code → MIDI number
 
     init(container) {
         this.render(container);
@@ -134,6 +135,7 @@ export const Keyboard = {
     releaseAll() {
         this.pointerNotes.clear();
         this.activationNotes.clear();
+        this.rowNotes.clear();
         Notes.releaseAll();
     },
 
@@ -191,9 +193,13 @@ export const Keyboard = {
             const midiNumber = KEY_TO_NOTE.get(event.code);
             if (midiNumber === undefined) return;
             event.preventDefault();
-            // press() does not retrigger a note already held, so auto-repeat is
-            // harmless.
-            this.press(midiNumber, 'note-row');
+            if (this.rowNotes.has(event.code)) return; // auto-repeat
+            // Remembered per key, so the keyup releases what this keydown
+            // started rather than whatever the mapping says by then.
+            this.rowNotes.set(event.code, midiNumber);
+            // The owner token names the key, not the row: two keys held at once
+            // are two holders, and one letting go leaves the other sounding.
+            this.press(midiNumber, `row:${event.code}`);
         });
 
         window.addEventListener('keyup', (event) => {
@@ -207,9 +213,10 @@ export const Keyboard = {
                 return;
             }
 
-            const midiNumber = KEY_TO_NOTE.get(event.code);
+            const midiNumber = this.rowNotes.get(event.code);
             if (midiNumber === undefined) return;
-            this.release(midiNumber, 'note-row');
+            this.rowNotes.delete(event.code);
+            this.release(midiNumber, `row:${event.code}`);
         });
     },
 };

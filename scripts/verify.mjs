@@ -826,6 +826,14 @@ const checks = [
             // The browser delivers no keyup after a real blur; clear the state
             // Playwright still holds so the next check starts clean.
             for (const key of ['z', 'x', 'c']) await page.keyboard.up(key);
+
+            // And it left no per-key state behind. A row key still recorded as
+            // held reads the next keydown as auto-repeat and swallows it, so
+            // the note the player pressed after switching back never sounds.
+            await resetSpy(page);
+            await page.keyboard.down('z');
+            if (!(await isLit(page, 60))) throw new Error('the first press after blur did not sound');
+            await page.keyboard.up('z');
         },
     },
     {
@@ -1184,6 +1192,33 @@ const checks = [
             await page.keyboard.up(' ');
             if (await isLit(page, 64)) throw new Error('the note outlived both keys');
             await page.evaluate(() => document.activeElement.blur());
+        },
+    },
+    {
+        name: 'two row keys held together release independently',
+        async run(page) {
+            // Both rows used to press every note under one shared owner token,
+            // and the keyup looked the key up in the mapping again to decide
+            // what to release. Each key now owns the note it pressed — the same
+            // fix the pointer and Space/Enter paths already carry, and what
+            // makes a note survive the mapping changing mid-hold.
+            await resetSpy(page);
+            await page.keyboard.down('z'); // C4
+            await page.keyboard.down('c'); // E4
+
+            await page.keyboard.up('z');
+            if (await isLit(page, 60)) throw new Error('C4 stayed lit after its own key was released');
+            if (!(await isLit(page, 64))) throw new Error('releasing "z" cut the note "c" is holding');
+
+            const spy = await audioSpy(page);
+            const sounding = voicesIn(spy).filter((v) => !v.stopped);
+            if (sounding.length !== 1) throw new Error(`expected 1 note still sounding, got ${sounding.length}`);
+            if (Math.abs(sounding[0].frequency - 330) > 1) {
+                throw new Error(`expected E4 (~330 Hz) to be the survivor, got ${sounding[0].frequency}`);
+            }
+
+            await page.keyboard.up('c');
+            if (await isLit(page, 64)) throw new Error('E4 outlived its key');
         },
     },
     {
