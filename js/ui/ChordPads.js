@@ -36,14 +36,19 @@ export const ChordPads = {
     },
 
     setScale(root, scale) {
+        // Stop first, then move. Both stops release notes worked out from the
+        // current root and chord list, so storing the new ones first releases
+        // notes that were never pressed and leaves the sounding ones held for
+        // ever — every root change then piling up voices nothing can stop.
+        //
+        // A latched chord belongs to the scale that built it, so it must not
+        // survive the change either: it would be a chord from nowhere.
+        this.stopChord();
+        this.stopDrone();
+
         this.root = root;
         this.scale = scale;
         this.chords = chordsIn(root, scale);
-
-        // A latched chord belongs to the scale that built it, so switching
-        // scales must not leave it sounding — it would be a chord from nowhere.
-        this.stopChord();
-        if (this.droning) this.stopDrone();
 
         this.render();
     },

@@ -250,6 +250,26 @@ const checks = [
         },
     },
     {
+        name: 'switching root strands neither a latched chord nor the drone',
+        async run(page) {
+            // The root is stored before the sounding notes are released, so a
+            // release computed from the *new* root frees notes that were never
+            // pressed and leaves the real ones held for ever. Every root change
+            // then adds voices that can never be stopped, and the app grows
+            // steadily louder and muddier until it is unusable.
+            await page.selectOption('#root', '60');
+            await resetSpy(page);
+            await page.click('.pad[data-degree="0"]');
+            await page.click('#drone');
+            await page.selectOption('#root', '62');
+
+            const sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length !== 0) throw new Error(`${sounding.length} voices survived the root change`);
+
+            await page.selectOption('#root', '60');
+        },
+    },
+    {
         name: 'switching scale strands neither a latched chord nor the drone',
         async run(page) {
             await resetSpy(page);
