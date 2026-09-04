@@ -114,6 +114,67 @@ export const PRESETS = [
  * anything here, so it is staged conservatively and gets its weight from the
  * pitch drop instead of from level.
  */
+/**
+ * The sounds the muse plays through, as opposed to the ones the player picks.
+ *
+ * Kept out of PRESETS for the same reason KICK is: the picker is the player's
+ * instrument list, and these two are chosen by the transport, not by a person.
+ * A rolling bass in the picker would be a fine synth patch, but it would also
+ * mean the muse's sound changes whenever the player fancies a different pad.
+ *
+ * No ids or names, for the reason KICK gives below: nothing looks these up, and
+ * fields that exist only to make them resemble a preset would argue against the
+ * paragraph above.
+ *
+ * The lead is here but unplayed — the lead lane is #35. It is preset data the
+ * ticket asked for, sitting where the lane will find it; until then it is
+ * exercised by no check and heard by nobody, which is worth knowing when it
+ * first sounds.
+ *
+ * The envelope numbers are the research's, and they are folklore: attack 1–3ms,
+ * sustain 0, decay 60–80ms, release 20–40ms, "the note must fully die before
+ * the next 16th triggers — that is what produces a roll rather than a legato
+ * smear". No transcriptions exist behind them, so expect to tune by ear.
+ */
+export const MUSE_PRESETS = {
+    bass: {
+        voices: [
+            { type: 'sawtooth', detune: 0, gain: 0.55 },
+            // Sub an octave down, sine so it adds weight without harmonics
+            // competing with the saw above it.
+            { type: 'sine', detune: -1200, gain: 0.35 },
+        ],
+        attack: 0.002,
+        // Sustain 0 with a 70ms decay is the whole ticket: at 138bpm a 16th is
+        // 109ms, so the note is gone with 40ms to spare and the line rolls.
+        decay: 0.07,
+        sustain: 0,
+        release: 0.03,
+        peak: 0.16, // the same staging as the Bass preset, for the same reason
+        cutoff: 220,
+        resonance: 6, // acid-leaning, which is Goa territory
+        filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.1, octaves: 2.5 },
+        reverb: 0.05, // reverb on low frequencies is mud
+    },
+    lead: {
+        voices: [
+            { type: 'sawtooth', detune: -6, gain: 0.3 },
+            { type: 'sawtooth', detune: 6, gain: 0.3 },
+        ],
+        attack: 0.004,
+        // Shorter than the bass: the research describes the 303-as-lead with
+        // "32nd note length and very short decay".
+        decay: 0.05,
+        sustain: 0,
+        release: 0.06,
+        peak: 0.13,
+        cutoff: 900,
+        resonance: 7,
+        filterEnvelope: { attack: 0.004, decay: 0.1, sustain: 0.2, octaves: 3 },
+        reverb: 0.2,
+    },
+};
+
 export const KICK = {
     // No id or name: nothing looks this up and the button carries its own
     // label. Fields that exist only to make it resemble a preset would argue

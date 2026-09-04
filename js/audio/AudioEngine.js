@@ -1,12 +1,15 @@
 // Web Audio API directly — no framework, no dependency.
+//
+// The shared end of the graph, the context, and the presets a note is played
+// with. Building the note itself lives in Voice.js — the seam issue #33 named,
+// split when this file approached the 500 lines rule 5 allows.
 import { KICK, presetById } from './Presets.js';
+import { createVoice } from './Voice.js';
+import { noteToFrequency } from './pitch.js';
 
-// Equal temperament, A4 = 440 Hz at MIDI 69. Pitch conversion lives here
-// because it is audio domain knowledge: a second sound source must not
-// duplicate it, and the UI must not have to know it.
-export function noteToFrequency(midiNumber) {
-    return 440 * 2 ** ((midiNumber - 69) / 12);
-}
+// Re-exported: this was the import site before the split, and every caller
+// already asks the engine for it.
+export { noteToFrequency };
 
 // Envelope shape comes from the selected preset. What stays constant is the
 // floor an exponential ramp cannot cross — it never reaches zero, so silence
@@ -211,9 +214,13 @@ export const AudioEngine = {
      * headroom — this must not add its own, or every scheduled note would drift
      * later than the step it belongs to.
      */
-    noteAt(midiNumber, when, duration = 0.12) {
+    noteAt(midiNumber, when, duration = 0.12, articulation = {}) {
         this.ensureContext();
-        const voice = this.startVoice(midiNumber, when);
+        const voice = this.startVoice(midiNumber, when, articulation);
+        // A slid step is not released here: the next step bends this same voice
+        // and takes over responsibility for ending it. Releasing on schedule
+        // would cut the note the glide is supposed to travel through.
+        if (articulation.hold) return voice;
         // Scheduled on the audio clock rather than by a timer: a setTimeout
         // release would jitter against a sample-accurate start, which is
         // audible as an uneven gate length.
@@ -221,127 +228,14 @@ export const AudioEngine = {
         return voice;
     },
 
-    startVoice(midiNumber, now) {
-        const ctx = this.ensureContext();
-        const destination = this.input();
-        const { attack, release, peak, voices: layers } = this.preset;
-
-        const frequency = noteToFrequency(midiNumber);
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(peak, now + attack);
-
-        // Each voice gets its own filter so the cutoff moves over the life of
-        // *that note*. A note that starts bright and darkens is most of what
-        // separates a synth from a tone generator, and a static cutoff was the
-        // single biggest thing missing from the first version.
-        const env = this.preset.filterEnvelope;
-        const voiceFilter = ctx.createBiquadFilter();
-        voiceFilter.type = 'lowpass';
-        voiceFilter.Q.value = this.preset.resonance;
-
-        const base = this.preset.cutoff;
-        const open = Math.min(base * 2 ** env.octaves, 18000);
-        const sustained = Math.min(base * 2 ** (env.octaves * env.sustain), 18000);
-        voiceFilter.frequency.setValueAtTime(base, now);
-        voiceFilter.frequency.linearRampToValueAtTime(open, now + env.attack);
-        // Exponential: brightness is heard logarithmically, so a linear fall
-        // sounds like it stops moving halfway down.
-        voiceFilter.frequency.exponentialRampToValueAtTime(
-            Math.max(sustained, 40),
-            now + env.attack + env.decay,
-        );
-
-        gain.connect(voiceFilter).connect(destination);
-
-        const oscillators = layers.map((layer) => {
-            const osc = ctx.createOscillator();
-            osc.type = layer.type;
-            osc.frequency.value = frequency;
-            osc.detune.value = layer.detune;
-
-            const level = ctx.createGain();
-            level.gain.value = layer.gain;
-            osc.connect(level).connect(gain);
-            osc.start(now);
-            return osc;
-        });
-
-        let stopped = false;
-
-        // Both paths end a voice the same way; only the time differs. A held
-        // key releases at whatever "now" is when the finger lifts, a sequenced
-        // step at a time the clock decided in advance.
-        const releaseAt = (requested, { holdThroughAttack = true } = {}) => {
-            if (stopped) return;
-            stopped = true;
-            this.voices.delete(voice);
-
-            // A held key is never released before its attack has finished: a
-            // tap let go faster than resume() settles would otherwise end the
-            // note before it began, which is silence again.
-            //
-            // A sequenced step is the opposite case. Its end is decided by the
-            // clock, and stretching it to fit a slow preset's attack would make
-            // every note outlast its own step — on the default pad (attack
-            // 0.25s) a 16th at 138bpm lasts 0.109s, so notes would pile up
-            // three deep and the line would smear into a drone. It is floored
-            // at the start time instead: the envelope simply ends early, which
-            // is quiet rather than wrong.
-            const floor = holdThroughAttack ? now + attack : now;
-            const end = Math.max(requested, floor);
-
-            // Cancel the attack first: releasing mid-attack otherwise ramps
-            // from a value the scheduler has not reached yet, which clicks.
-            gain.gain.cancelScheduledValues(end);
-
-            // What the envelope is worth at `end`, computed rather than read.
-            //
-            // `gain.gain.value` is the level *now*, and for a scheduled note
-            // `end` is in the future — so reading it pins a value the ramp has
-            // not reached, and the envelope jumps there instead of continuing.
-            // For a bass 16th that jump was a step up: the note re-attacked at
-            // full peak on top of its own decaying oscillator and rendered at
-            // 1.23, thirty-two clipped samples per note. The limiter cannot
-            // catch it for the reason issue #25 records — it tracks a smoothed
-            // envelope, not sample peaks.
-            //
-            // A held key is unaffected either way, because `end` is genuinely
-            // now for a finger leaving a key. Only the clock's path is in the
-            // future, and only it was clipping.
-            const elapsed = end - now;
-            const level = elapsed >= attack ? peak : peak * (elapsed / attack);
-            gain.gain.setValueAtTime(Math.max(level, SILENCE), end);
-            gain.gain.exponentialRampToValueAtTime(SILENCE, end + release);
-            for (const osc of oscillators) osc.stop(end + release);
-        };
-
-        const voice = {
-            midiNumber,
-            /** Release at an explicit time on the audio clock — the clock's path. */
-            stopAt: (end, options) => releaseAt(end, options),
-            stop: () => releaseAt(this.startTime()),
-        };
-
-        this.voices.add(voice);
-        return voice;
+    /**
+     * Start a voice. Delegates to Voice.js, which owns everything between a
+     * note beginning and ending; the engine owns the chain it runs through.
+     */
+    startVoice(midiNumber, now, articulation) {
+        return createVoice(this, midiNumber, now, articulation);
     },
 
-    /**
-     * The kick: one thump at a given time on the audio clock.
-     *
-     * Deliberately not a voice. It takes no MIDI note, cannot be held, and is
-     * not added to `this.voices` — nothing can release it early because it ends
-     * itself, and stopAll() has no business silencing a percussive hit that is
-     * already over. It is also not tracked by the transport's `sounding` set
-     * for the same reason.
-     *
-     * It bypasses the shared filter and goes straight to the limiter's input
-     * side of the chain. The shared filter is the player's control: sweeping the
-     * cutoff down to hear a pad darken would also swallow the kick, and a drum
-     * that disappears when you move a synth control is a bug the player would
-     * blame on the filter.
-     */
     kickAt(when) {
         const ctx = this.ensureContext();
         this.input(); // builds the chain if this is the first sound

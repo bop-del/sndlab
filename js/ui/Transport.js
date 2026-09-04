@@ -1,5 +1,11 @@
 import { DEFAULT_BPM, createClock, secondsPerStep } from '../audio/Clock.js';
 import { AudioEngine } from '../audio/AudioEngine.js';
+import { MUSE_PRESETS } from '../audio/Presets.js';
+
+// How many step voices to keep handles for. A step releases itself well inside
+// one bar, so anything older than a handful has finished — this bounds the set
+// without ever being reached in normal play.
+const VOICE_CAP = 8;
 import { SCALES } from '../theory/Scales.js';
 import { generateBass, isKickStep } from '../theory/Generator.js';
 
@@ -16,6 +22,10 @@ export const Transport = {
     // The steps this transport started, so stop() can silence its own loop
     // without touching notes the keyboard or the pads are holding.
     sounding: new Set(),
+    // The voice a slide would bend, and the step that set it going. A slide is
+    // a property of the step *before* the one it lands on, so this is the only
+    // way playStep can know it is continuing a note rather than starting one.
+    gliding: null,
     // The tempo lives here, not in the slider's value: reading the DOM back for
     // a number this module rendered makes the input the store, and the store
     // then disagrees with the clock the moment either is set another way.
@@ -127,6 +137,7 @@ export const Transport = {
 
     stop() {
         this.clock?.stop();
+        this.gliding = null;
         // Only the steps this clock scheduled. AudioEngine.stopAll() would
         // silence every voice in the engine — including a chord pad or a key
         // held by a finger — and leave Notes' own map claiming they still
@@ -144,14 +155,60 @@ export const Transport = {
         if (isKickStep(step) && !this.kickMuted) AudioEngine.kickAt(when);
 
         const cell = this.pattern?.steps[step];
-        if (!cell || cell.gate !== 'note') return;
-        // Held so stop() can silence the loop without reaching for every voice
-        // in the engine. A step releases itself, so this set is only ever a
-        // couple of notes deep — whatever is scheduled but not yet finished.
-        const voice = AudioEngine.noteAt(this.degreeToNote(cell), when, this.stepSeconds());
+        if (!cell || cell.gate !== 'note') {
+            // A slide travels into the note that follows it, so one pointing at
+            // a rest has nothing to reach. The generator strips those, but the
+            // held voice would drone if one ever arrived here — the engine must
+            // not depend on the generator's guarantee to avoid a stuck note.
+            if (this.gliding?.from?.slide) {
+                this.gliding.voice.stopAt(when, { holdThroughAttack: false });
+                this.gliding = null;
+            }
+            return;
+        }
+        const note = this.degreeToNote(cell);
+
+        // A slide bends the voice that is already sounding rather than starting
+        // another one — the 303 glides between tied notes on one oscillator, so
+        // the line sings instead of re-articulating. The *previous* step's
+        // slide flag decides this, not this step's: a slide travels into the
+        // note that follows it, which is why a slide before a rest is
+        // inaudible and why the generator strips those.
+        if (this.gliding?.voice && this.gliding.from?.slide) {
+            this.gliding.voice.slideTo(note, when);
+            // The bent voice is still held, so responsibility for ending it
+            // passes to this step: a chain of slides is one voice, and only the
+            // last link releases it.
+            this.gliding = { voice: this.gliding.voice, from: cell };
+            if (!cell.slide) this.gliding.voice.stopAt(when + this.stepSeconds(), { holdThroughAttack: false });
+            return;
+        }
+
+        // Played through the muse's own bass, not whatever the player has
+        // selected: the line is being judged on its notes, and judging it
+        // through the chord-pad patch judges the patch.
+        const voice = AudioEngine.noteAt(note, when, this.stepSeconds(), {
+            accent: cell.accent,
+            preset: MUSE_PRESETS.bass,
+            // A slid step must still be sounding when the next step arrives, or
+            // there is nothing left to bend. Held to the full step rather than
+            // the shortened gate.
+            hold: cell.slide,
+        });
+        this.gliding = { voice, from: cell };
         this.sounding.add(voice);
-        if (this.sounding.size > 8) {
-            for (const old of [...this.sounding].slice(0, this.sounding.size - 8)) this.sounding.delete(old);
+
+        // Stopped, not merely forgotten. Dropping the handle leaves the voice
+        // sounding with nothing able to reach it — and a slid step is held
+        // rather than self-releasing, so an evicted one drones for ever. The
+        // cap exists to bound the set, not to end notes: a self-releasing voice
+        // has already finished by the time it is evicted, and stop() on a
+        // finished voice is a no-op.
+        if (this.sounding.size > VOICE_CAP) {
+            for (const spent of [...this.sounding].slice(0, this.sounding.size - VOICE_CAP)) {
+                if (spent !== this.gliding?.voice) spent.stop();
+                this.sounding.delete(spent);
+            }
         }
     },
 

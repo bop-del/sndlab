@@ -135,6 +135,20 @@ function installAudioSpy() {
                     record.targets.push(value);
                     return orig(value, ...rest);
                 };
+
+                // The per-voice filter is automated with ramps, not
+                // setTargetAtTime, so its envelope was invisible to the spy —
+                // and "an accent is brighter" could only be asserted against a
+                // copy of the engine's own constant. Recorded separately from
+                // `targets`, which the shared filter's cutoff check reads.
+                for (const method of ['linearRampToValueAtTime', 'exponentialRampToValueAtTime']) {
+                    const ramp = node.frequency[method].bind(node.frequency);
+                    node.frequency[method] = (value, ...rest) => {
+                        record.ramps ??= [];
+                        record.ramps.push(value);
+                        return ramp(value, ...rest);
+                    };
+                }
                 return node;
             };
         }
@@ -594,6 +608,262 @@ const checks = [
                 if (peak > 0.95) {
                     throw new Error(`preset "${id}" has no headroom: peak ${peak}, wanted under 0.95`);
                 }
+            }
+        },
+    },
+    {
+        name: 'a muse bass note dies before the next 16th',
+        async run(page) {
+            // The whole point of the ADSR work: at sustain 0 with a 70ms decay
+            // the note is gone before the next step arrives, which is what
+            // makes a line roll instead of smear. Through the old
+            // attack-then-hold envelope this ratio was ~1.
+            const measured = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { MUSE_PRESETS, PRESETS } = await import('/js/audio/Presets.js');
+                const ctx = new OfflineAudioContext(1, 44100, 44100);
+                Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                const engine = Object.create(AudioEngine);
+                engine.ctx = ctx;
+                engine.voices = new Set();
+                engine.filter = null;
+                engine.reverb = null;
+                engine.limiter = null;
+                engine.preset = PRESETS[0];
+
+                const step = 60 / 138 / 4;
+                engine.noteAt(36, 0.05, step * 0.9, { preset: MUSE_PRESETS.bass });
+                const data = (await ctx.startRendering()).getChannelData(0);
+
+                const rms = (from, to) => {
+                    let sum = 0;
+                    let n = 0;
+                    for (let i = Math.floor(from * 44100); i < Math.floor(to * 44100) && i < data.length; i++) {
+                        sum += data[i] * data[i];
+                        n++;
+                    }
+                    return Math.sqrt(sum / Math.max(n, 1));
+                };
+                return { during: rms(0.05, 0.1), next: rms(0.05 + step, 0.05 + step + 0.02) };
+            });
+            if (measured.during === 0) throw new Error('the muse bass rendered silence');
+            const ratio = measured.next / measured.during;
+            // A tenth is generous: measured at 0.026, and an attack-and-hold
+            // envelope sits near 1. Anything under this is audibly a roll.
+            if (ratio > 0.1) {
+                throw new Error(`the note is still sounding at the next step: ${ratio.toFixed(3)} of its level`);
+            }
+        },
+    },
+    {
+        name: 'an accented step is both louder and brighter',
+        async run(page) {
+            // The spy's `shared.filter` slot is claimed by the first filter
+            // built and never reassigned, so an offline render would hand it a
+            // node from a finished context — the same care the other offline
+            // checks take.
+            const keep = await page.evaluate(() => {
+                window.__sharedFilterBefore = window.audioSpy.shared.filter;
+                return true;
+            });
+            if (!keep) throw new Error('could not snapshot the shared filter slot');
+            // Both halves, because doing only the volume half is the documented
+            // way to get a 303 accent wrong. Brightness is asserted at the
+            // filter envelope rather than in the samples: on a 65Hz bass note
+            // the spectral difference is real but too slow to measure from a
+            // short render without an FFT.
+            const measured = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { MUSE_PRESETS, PRESETS } = await import('/js/audio/Presets.js');
+                const peakOf = async (accent) => {
+                    const ctx = new OfflineAudioContext(1, 44100, 44100);
+                    Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                    const engine = Object.create(AudioEngine);
+                    engine.ctx = ctx;
+                    engine.voices = new Set();
+                    engine.filter = null;
+                    engine.reverb = null;
+                    engine.limiter = null;
+                    engine.preset = PRESETS[0];
+                    engine.noteAt(36, 0.02, 0.09, { preset: MUSE_PRESETS.bass, accent });
+                    const data = (await ctx.startRendering()).getChannelData(0);
+                    let peak = 0;
+                    for (const v of data) { const a = Math.abs(v); if (a > peak) peak = a; }
+                    return peak;
+                };
+
+                return {
+                    plainPeak: await peakOf(false),
+                    accentPeak: await peakOf(true),
+                };
+            });
+
+            if (!(measured.accentPeak > measured.plainPeak * 1.15)) {
+                throw new Error(`an accent is not louder: ${measured.plainPeak.toFixed(4)} vs ${measured.accentPeak.toFixed(4)}`);
+            }
+
+            // The brightness half, read off what the engine actually told the
+            // voice filter to do. Recomputing it from the preset here would
+            // assert a copy of the engine's own constant — and would keep
+            // passing if createVoice stopped applying accent to the filter at
+            // all, which is exactly the half of a 303 accent people forget.
+            const opened = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { MUSE_PRESETS, PRESETS } = await import('/js/audio/Presets.js');
+                const highest = async (accent) => {
+                    const ctx = new OfflineAudioContext(1, 4410, 44100);
+                    Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                    const engine = Object.create(AudioEngine);
+                    engine.ctx = ctx;
+                    engine.voices = new Set();
+                    engine.filter = null;
+                    engine.reverb = null;
+                    engine.limiter = null;
+                    engine.preset = PRESETS[0];
+                    const before = window.audioSpy.nodes.length;
+                    engine.noteAt(36, 0, 0.05, { preset: MUSE_PRESETS.bass, accent });
+                    const built = window.audioSpy.nodes.slice(before)
+                        .filter((n) => n.node === 'filter' && n.ramps);
+                    await ctx.startRendering();
+                    // The brightest point the envelope was told to reach.
+                    return Math.max(...built.flatMap((n) => n.ramps));
+                };
+                const plain = await highest(false);
+                const accented = await highest(true);
+                window.audioSpy.shared.filter = window.__sharedFilterBefore;
+                return { plain, accented };
+            });
+            if (!(opened.accented > opened.plain * 1.2)) {
+                throw new Error(`an accent opens the filter to ${opened.accented.toFixed(0)}Hz vs ${opened.plain.toFixed(0)}Hz — not audibly brighter`);
+            }
+        },
+    },
+    {
+        name: 'a slide bends one voice instead of starting a second',
+        async run(page) {
+            // What separates a slide from two overlapping notes. The 303 glides
+            // on one oscillator, so the line sings rather than re-articulating;
+            // a second voice crossfaded against the first is a different sound.
+            const measured = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { MUSE_PRESETS, PRESETS } = await import('/js/audio/Presets.js');
+                const ctx = new OfflineAudioContext(1, 44100, 44100);
+                Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                const engine = Object.create(AudioEngine);
+                engine.ctx = ctx;
+                engine.voices = new Set();
+                engine.filter = null;
+                engine.reverb = null;
+                engine.limiter = null;
+                engine.preset = PRESETS[0];
+
+                const before = window.audioSpy.nodes.length;
+                const voice = engine.noteAt(36, 0.02, 0.09, { preset: MUSE_PRESETS.bass, hold: true });
+                const afterFirst = window.audioSpy.nodes.length;
+                voice.slideTo(43, 0.08);
+                const afterSlide = window.audioSpy.nodes.length;
+                voice.stopAt(0.2, { holdThroughAttack: false });
+                await ctx.startRendering();
+
+                return {
+                    oscillatorsForNote: window.audioSpy.nodes.slice(before, afterFirst)
+                        .filter((n) => n.node === 'oscillator').length,
+                    oscillatorsForSlide: window.audioSpy.nodes.slice(afterFirst, afterSlide)
+                        .filter((n) => n.node === 'oscillator').length,
+                    endedOn: voice.midiNumber,
+                };
+            });
+            if (measured.oscillatorsForNote === 0) throw new Error('the note started no oscillators at all');
+            // The claim: sliding creates nothing. The note's own layers are
+            // whatever the preset stacks; the slide adds none of them.
+            if (measured.oscillatorsForSlide !== 0) {
+                throw new Error(`sliding started ${measured.oscillatorsForSlide} new oscillator(s) — it should bend the ones playing`);
+            }
+            if (measured.endedOn !== 43) throw new Error(`the voice ended on ${measured.endedOn}, expected 43`);
+        },
+    },
+    {
+        name: 'a slide pointing at a rest leaves nothing droning',
+        async run(page) {
+            // The generator strips these, so this asserts the engine does not
+            // *depend* on that. A slid step is held rather than self-releasing,
+            // so if one ever reached the transport with a rest after it, the
+            // voice would sound for ever with nothing able to reach it.
+            const stuck = await page.evaluate(async () => {
+                const { Transport } = await import('/js/ui/Transport.js');
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const before = AudioEngine.voices.size;
+
+                // A hand-built pattern the generator would never emit: a slid
+                // note followed by a rest.
+                const rest = { gate: 'rest', degree: 0, octave: 0, accent: false, slide: false };
+                const steps = Array.from({ length: 16 }, () => ({ ...rest }));
+                steps[1] = { gate: 'note', degree: 0, octave: 0, accent: false, slide: true };
+                const saved = Transport.pattern;
+                Transport.pattern = { lane: 'bass', steps };
+
+                const now = AudioEngine.ensureContext().currentTime;
+                Transport.playStep(1, now);      // the slid note starts, held
+                Transport.playStep(2, now + 0.1); // a rest — nothing to slide into
+                const held = AudioEngine.voices.size - before;
+
+                Transport.pattern = saved;
+                Transport.gliding = null;
+                AudioEngine.stopAll();
+                return held;
+            });
+            if (stuck > 0) throw new Error(`${stuck} voice(s) left sounding after a slide into a rest`);
+        },
+    },
+    {
+        name: 'the existing presets sound exactly as they did before ADSR',
+        async run(page) {
+            // The criterion this ticket is most likely to break: adding decay
+            // and sustain to the envelope must leave every preset written
+            // before it untouched. They declare neither, so they take
+            // sustain 1 and decay 0 — which is the old attack-then-hold shape.
+            const drifted = await page.evaluate(async () => {
+                const { PRESETS } = await import('/js/audio/Presets.js');
+                return PRESETS
+                    .filter((preset) => preset.decay !== undefined || preset.sustain !== undefined)
+                    .map((preset) => preset.id);
+            });
+            if (drifted.length > 0) {
+                throw new Error(`presets now carry an amplitude decay: ${drifted.join(', ')} — they must keep the old envelope`);
+            }
+
+            // And the envelope maths agrees: with no decay declared, the level
+            // after the attack is the peak and stays there.
+            const held = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { PRESETS } = await import('/js/audio/Presets.js');
+                const ctx = new OfflineAudioContext(1, 44100, 44100);
+                Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                const engine = Object.create(AudioEngine);
+                engine.ctx = ctx;
+                engine.voices = new Set();
+                engine.filter = null;
+                engine.reverb = null;
+                engine.limiter = null;
+                engine.preset = PRESETS[0];
+                engine.noteOn(60);
+                const data = (await ctx.startRendering()).getChannelData(0);
+                const rms = (from, to) => {
+                    let sum = 0;
+                    let n = 0;
+                    for (let i = Math.floor(from * 44100); i < Math.floor(to * 44100) && i < data.length; i++) {
+                        sum += data[i] * data[i];
+                        n++;
+                    }
+                    return Math.sqrt(sum / Math.max(n, 1));
+                };
+                // A held pluck still sounding well after any decay would have
+                // finished, if one had wrongly been applied.
+                return { early: rms(0.02, 0.06), later: rms(0.3, 0.4) };
+            });
+            if (held.early === 0) throw new Error('a held note rendered silence');
+            if (held.later < held.early * 0.2) {
+                throw new Error(`a held note decayed to ${(held.later / held.early).toFixed(3)} — a decay was applied where none was asked for`);
             }
         },
     },
