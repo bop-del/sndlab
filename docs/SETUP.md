@@ -50,8 +50,8 @@ they are the raw material.
 **Define the scope.** The project deliberately started without one. It is a web
 synth, but the shape is undecided: a small groovebox (sequencer + one voice +
 drums), a single instrument done well, or something less conventional. This is
-the natural first use of `/grill-me` — it interviews until the decision is made.
-Blocks almost everything else.
+the natural first use of `/grill-with-docs` — it interviews until the decision
+is made. Blocks almost everything else.
 
 **A playable instrument.** Right now a single button plays a fixed 220 Hz tone.
 The smallest step to something actually playable is an on-screen keyboard plus
@@ -68,12 +68,19 @@ Worth an issue so the moment gets noticed rather than discovered later.
 
 ```
 idea
-  ↓  /grill-me      sharpen scope, settle decisions
-  ↓  /to-tickets    plan → issues, each with its blocking edges
-  ↓  /triage        assess, label, write an agent brief
-  ↓  implement      branch → PR
-  ↓  push to main   GitHub Pages deploys automatically
+  ↓  /grill-with-docs  sharpen scope, settle decisions; writes ADRs as it goes
+  ↓  /to-tickets       plan → issues, each with its blocking edges
+  ↓  /triage           assess, label, write an agent brief
+  ↓  /implement        build it; drives /tdd, closes with /code-review
+  ↓  push to main      GitHub Pages deploys automatically
+  ↓  /accept-ticket    Boris hears it and looks at it → Done
 ```
+
+The last step is the one an agent cannot finish alone. Everything above it can
+be done cold by a fresh session; `Done` cannot, because it means a human judged
+the parts no assertion covers — whether it sounds good, whether the layout is
+right, whether the feature was worth having. `/accept-ticket` runs that session
+and does the mechanics around the answers, but the verdicts are Boris's.
 
 For work too large for one session, `/wayfinder` creates a map issue labelled
 `wayfinder:map` whose child issues are *decisions* rather than tasks, wired with
@@ -89,4 +96,4 @@ a file.
 - `bin/setup` shows no warnings
 - `docs/agents/issue-tracker.md` exists and is committed
 - `gh issue list` shows the first issues
-- `/grill-me` starts and asks its first question
+- `/grill-with-docs` starts and asks its first question

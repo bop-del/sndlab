@@ -176,7 +176,8 @@ Three rules, in order of how much damage breaking them does:
 1. **Claim before starting.** Move the card to `In progress` as your first write,
    before any code. A claim made afterwards prevents nothing.
 2. **Only Boris moves a card to `Done`.** Done means a human heard it and looked
-   at the screenshot. Move finished work to `Needs review` and stop there.
+   at the screenshot. Move finished work to `Needs review` and stop there —
+   `/accept-ticket` picks it up from there, and always asks before moving a card.
 3. **Every card is a real issue** — no draft items.
 
 If a card sits in `In progress` with a clean tree and nothing pushed, that

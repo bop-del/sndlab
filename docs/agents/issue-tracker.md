@@ -36,7 +36,7 @@ they cannot disagree. See `triage-labels.md`.
 | **Needs decision** | Scope is not settled. No agent should build this. | `/grill-with-docs` |
 | **Ready** | Spec written. An agent can take it cold. | `/implement` |
 | **In progress** | Claimed by a session. Do not pick this up. | — |
-| **Needs review** | Built and the checks pass. Waiting on the parts an agent cannot judge: the sound, and the screenshot. | Boris |
+| **Needs review** | Built and the checks pass. Waiting on the parts an agent cannot judge: the sound, and the screenshot. | `/accept-ticket` |
 | **Done** | Verified and pushed. | — |
 
 ### Rules
@@ -48,6 +48,13 @@ they cannot disagree. See `triage-labels.md`.
 - **Only Boris moves anything to `Done`.** Done means a human heard it and looked
   at the screenshot. An agent closing out its own work is the failure the
   verification rule in `CLAUDE.md` exists to prevent.
+
+  `/accept-ticket` is how that judgement gets made: it runs the checks, opens
+  the app on a build it has proved is not stale, works out what the assertions
+  could not have judged, and walks those one at a time. It always *asks* before
+  moving a card — an agent may do the mechanics, never the deciding. A card
+  moved because every test passed rather than because Boris said so is the same
+  lie, with more steps.
 - **Every card is a real issue.** No draft items — a draft is a second source of
   truth that `gh issue list` cannot see. This applies to `Ideas` too: the cost is
   that `gh issue list` returns candidates alongside real work, which is accepted
