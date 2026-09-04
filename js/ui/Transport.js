@@ -16,8 +16,8 @@ const VOICE_CAP = 8;
 export const LEAD_OCTAVES = 3;
 import { SCALES } from '../theory/Scales.js';
 import { generateBass, isKickStep } from '../theory/Generator.js';
-import { LEAD_VOICES, generateLead } from '../theory/Lead.js';
-import { loopBars, pickProgression } from '../theory/Progressions.js';
+import { LEAD_VOICES, chordTones, drawCell, generateLead } from '../theory/Lead.js';
+import { chordAt, loopBars, pickProgression } from '../theory/Progressions.js';
 
 // Play, stop and tempo — the controls that turn a generated pattern into
 // something you can hear loop.
@@ -187,7 +187,17 @@ export const Transport = {
         this.progression ??= pickProgression({ genre: this.genre });
         if (this.bars.length === 0) {
             this.bars = this.generate(generateBass);
-            this.leadBars = this.generate(generateLead);
+            // One cell for the whole loop, so a single idea precesses across it
+            // rather than each bar shifting new material. Drawn against the
+            // chord of bar 0, which for Goa is the only chord there is.
+            const voice = LEAD_VOICES[this.genre] ?? LEAD_VOICES.goa;
+            const scale = this.scale ?? SCALES[0];
+            const cell = drawCell({
+                voice,
+                scale,
+                tones: chordTones(chordAt(this.progression, 0), scale),
+            });
+            this.leadBars = this.generate((options) => generateLead({ ...options, cell }));
         }
         this.bar = 0;
         this.startedBar = false;

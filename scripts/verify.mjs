@@ -2339,10 +2339,42 @@ const checks = [
                 Transport.start();
                 Transport.stop();
 
+                // Recover each bar's cell: step i of bar b reads cell position
+                // (offset + i) % motif, so the pitches sounding in a bar map
+                // back onto cell positions. Every bar must agree about what
+                // sits at each position.
+                const motif = LEAD_VOICES.goa.motif;
+                const cell = new Array(motif).fill(null);
+                let agree = 0;
+                let disagree = 0;
+                Transport.leadBars.forEach((pattern, bar) => {
+                    const offset = (bar * 16) % motif;
+                    const sounding = pattern.steps
+                        .map((step, index) => (step.gate === 'note' ? index : -1))
+                        .filter((index) => index !== -1);
+                    pattern.steps.forEach((step, index) => {
+                        if (step.gate !== 'note') return;
+                        // Phrase boundaries are deliberately rewritten onto
+                        // chord tones, so they are not expected to match the
+                        // cell. Exempting them is the difference between
+                        // asserting the cell and asserting the anchor is off.
+                        if (index === sounding[0] || index === sounding.at(-1)) return;
+                        const place = (offset + index) % motif;
+                        if (cell[place] === null) cell[place] = step.degree;
+                        else if (cell[place] === step.degree) agree++;
+                        else disagree++;
+                    });
+                });
+                // Overwhelming agreement, not perfection: with one cell every
+                // interior note matches, and with a fresh cell per bar they
+                // agree only by coincidence.
+                const oneCell = agree + disagree > 0 && disagree / (agree + disagree) < 0.1;
+
                 const result = {
-                    motif: LEAD_VOICES.goa.motif,
+                    motif,
                     bars: Transport.leadBars.length,
                     distinct: new Set(Transport.leadBars.map(shape)).size,
+                    oneCell,
                 };
 
                 Transport.genre = saved;
@@ -2361,6 +2393,20 @@ const checks = [
             // bars would satisfy the length and still just repeat.
             if (measured.distinct < measured.motif - 1) {
                 throw new Error(`only ${measured.distinct} distinct bars in a ${measured.bars}-bar loop`);
+            }
+            // It is *one* cell moving, not a new one each bar. Shifting fresh
+            // material every bar also produces distinct bars, and sounds like
+            // randomness — which is exactly what it sounded like before this
+            // was asserted.
+            //
+            // Asserted structurally rather than statistically: a pitch count
+            // cannot tell the two apart, because a narrow walk redrawn per bar
+            // often lands on few pitches anyway. What is unambiguous is that
+            // every bar is the *same sequence* read from a different offset —
+            // so rotating each bar back by its own offset must recover one
+            // identical cell.
+            if (!measured.oneCell) {
+                throw new Error('each bar of the loop uses a different cell — that is randomness, not precession');
             }
         },
     },

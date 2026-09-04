@@ -132,6 +132,10 @@ export function generateLead({
     genre = 'goa',
     progression = STATIC_TONIC,
     bar = 0,
+    // The cell this bar reads from. Passed in so one idea can precess across a
+    // whole loop; omitted, a fresh one is drawn, which is right for a single
+    // bar and wrong for a sequence of them.
+    cell: pattern = null,
     random = Math.random,
 } = {}) {
     const voice = LEAD_VOICES[genre] ?? LEAD_VOICES.goa;
@@ -145,28 +149,11 @@ export function generateLead({
     // developing.
     const offset = (bar * STEPS) % voice.motif;
 
-    // The cell: a short run of pitches, walked once and then repeated. "A short
-    // 3–5 note cell repeated many times per phrase, with movement introduced
-    // through velocity and accent rather than new pitches."
-    //
-    // Drawn once per bar so the *pitches* are the cell; where the bar starts
-    // reading it is what precesses. A motif coprime with 16 begins at a
-    // different place in the cell each bar — 0, 2, 4, 6, 1, 3, 5 for a
-    // seven-note cell — so the same handful of notes lands in a different
-    // rhythm each time and only comes round after seven bars.
-    const cell = [];
-    let degree = tones[0];
-    for (let i = 0; i < voice.motif; i++) {
-        cell.push(degree);
-        // The last note walks back toward the first rather than onward. A cell
-        // repeats, so its wrap is an interval the ear hears every time round —
-        // and a cell that ended far from where it started turned that seam into
-        // a recurring leap, which is what pushed the measured rate to 13.7%
-        // even though every other move was a step.
-        degree = i === voice.motif - 2
-            ? stepBetween(degree, cell[0], scale.steps.length)
-            : nextDegree(degree, voice, scale, random);
-    }
+    // The cell is given, not drawn here. Drawing it per call meant every bar of
+    // a loop got a *different* cell, and shifting new material each bar is
+    // indistinguishable from randomness — which is what it sounded like. One
+    // cell moving is the whole device; seven cells moving is noise.
+    const cell = pattern ?? drawCell({ voice, scale, tones, random });
 
     for (let step = 0; step < STEPS; step++) {
         if (random() >= voice.density) continue;
@@ -197,6 +184,35 @@ export function generateLead({
     });
 
     return clearDanglingSlides({ lane: 'lead', steps });
+}
+
+/**
+ * A short run of pitches, walked once — the thing that repeats.
+ *
+ * *"A short 3–5 note cell repeated many times per phrase, with movement
+ * introduced through velocity and accent rather than new pitches."* The cell is
+ * the melody's identity; where each bar starts reading it is what precesses.
+ *
+ * Drawn once per loop rather than per bar. A motif coprime with 16 begins at a
+ * different place each bar — 0, 2, 4, 6, 1, 3, 5 for a seven-note cell — so one
+ * handful of notes lands in a different rhythm every bar and only comes round
+ * after seven.
+ */
+export function drawCell({ voice, scale, tones, random = Math.random }) {
+    const cell = [];
+    let degree = tones[0];
+    for (let i = 0; i < voice.motif; i++) {
+        cell.push(degree);
+        // The last note walks back toward the first rather than onward. A cell
+        // repeats, so its wrap is an interval the ear hears every time round —
+        // and a cell that ended far from where it started turned that seam into
+        // a recurring leap, which pushed the measured rate to 13.7% even though
+        // every other move was a step.
+        degree = i === voice.motif - 2
+            ? stepBetween(degree, cell[0], scale.steps.length)
+            : nextDegree(degree, voice, scale, random);
+    }
+    return cell;
 }
 
 /** How far apart two degrees are, the short way round the scale. */
