@@ -92,4 +92,42 @@ export const PRESETS = [
     },
 ];
 
+/**
+ * The kick. Not in PRESETS, because it is not a sound you can play.
+ *
+ * Every entry above is a pitched voice the keyboard can sound at any note. A
+ * kick is neither: it is one fixed thump, and putting it in the preset picker
+ * would offer the player an instrument that plays the same note whatever key
+ * they press. It is preset *data* in the same spirit — plain numbers the engine
+ * reads — but it is its own thing.
+ *
+ * The synthesis is the standard one, and it is two envelopes rather than a
+ * waveform: a sine whose pitch falls fast from a click into a low fundamental,
+ * under an amplitude decay of about the same length. The pitch drop is what
+ * makes it read as a kick rather than a low beep — the ear hears the attack
+ * transient as weight.
+ *
+ * `peak` is set by the rule at the top of this file, not in isolation. Issue
+ * #25 is the cautionary tale: the master limiter tracks a smoothed envelope
+ * rather than sample peaks, so a source staged hot clips *through* the limiter
+ * rather than being caught by it. A kick has the highest peak-to-RMS of
+ * anything here, so it is staged conservatively and gets its weight from the
+ * pitch drop instead of from level.
+ */
+export const KICK = {
+    // No id or name: nothing looks this up and the button carries its own
+    // label. Fields that exist only to make it resemble a preset would argue
+    // against the comment above, which is that it is not one.
+    // From a click down to the fundamental. 55 Hz is low enough to feel and
+    // high enough to survive a laptop speaker, which is where this is judged.
+    startFrequency: 150,
+    frequency: 55,
+    // The drop has to finish well inside the amplitude decay, or the pitch is
+    // still falling when the level has gone and the thump reads as a bloop.
+    pitchDecay: 0.045,
+    attack: 0.001,
+    decay: 0.28,
+    peak: 0.5,
+};
+
 export const presetById = (id) => PRESETS.find((preset) => preset.id === id) ?? PRESETS[0];

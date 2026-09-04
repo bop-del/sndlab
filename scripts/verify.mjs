@@ -598,6 +598,75 @@ const checks = [
         },
     },
     {
+        name: 'a bar of kick and sequenced bass does not clip',
+        async run(page) {
+            // The held-note version of this check above did not catch the
+            // sequenced path, and #31 shipped a bass 16th rendering at 1.23 —
+            // thirty-two clipped samples per note — which was accepted by ear
+            // without anyone hearing it. A scheduled note releases at a time in
+            // the *future*, and the release read `gain.value` (the level now)
+            // rather than computing what the envelope would be worth by then,
+            // so the note jumped back to full peak on top of its own decay.
+            //
+            // The limiter cannot save it, for the reason issue #25 records: it
+            // tracks a smoothed envelope, not sample peaks.
+            const measured = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { PRESETS } = await import('/js/audio/Presets.js');
+                const sharedBefore = { ...window.audioSpy.shared };
+                const results = [];
+
+                for (const preset of PRESETS) {
+                    const ctx = new OfflineAudioContext(1, 44100 * 3, 44100);
+                    // Reports `running`, for the reason the held-note check
+                    // above records: ensureContext() resumes a suspended
+                    // context, and an OfflineAudioContext throws on resume()
+                    // until rendering has started.
+                    Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                    const engine = Object.create(AudioEngine);
+                    engine.ctx = ctx;
+                    engine.voices = new Set();
+                    engine.filter = null;
+                    engine.reverb = null;
+                    engine.limiter = null;
+                    engine.preset = preset;
+
+                    // A real bar at the default tempo: kick on the downbeats,
+                    // bass on the twelve steps between them.
+                    const step = 60 / 138 / 4;
+                    for (let i = 0; i < 16; i++) {
+                        const when = 0.05 + i * step;
+                        if (i % 4 === 0) engine.kickAt(when);
+                        else engine.noteAt(36, when, step * 0.9);
+                    }
+
+                    const buffer = await ctx.startRendering();
+                    const data = buffer.getChannelData(0);
+                    let peak = 0;
+                    let over = 0;
+                    for (const sample of data) {
+                        const level = Math.abs(sample);
+                        if (level > peak) peak = level;
+                        if (level >= 1) over++;
+                    }
+                    results.push({ id: preset.id, peak: Number(peak.toFixed(4)), over });
+                }
+
+                window.audioSpy.shared.filter = sharedBefore.filter;
+                return results;
+            });
+
+            for (const { id, peak, over } of measured) {
+                if (over > 0) {
+                    throw new Error(`a sequenced bar on "${id}" clips: peak ${peak}, ${over} sample(s) at or past full scale`);
+                }
+                if (peak > 0.95) {
+                    throw new Error(`a sequenced bar on "${id}" has no headroom: peak ${peak}, wanted under 0.95`);
+                }
+            }
+        },
+    },
+    {
         name: 'both presets are offered and can be selected',
         async run(page) {
             const presets = await page.$$eval('#preset option', (os) => os.map((o) => o.value));
@@ -1853,6 +1922,72 @@ const checks = [
             // keyboard share one engine, so this is the check that they do not
             // fight over it.
             if (voices.length === 0) throw new Error('a key played nothing while the transport ran');
+        },
+    },
+    {
+        name: 'the kick lands on the four downbeats, and the bass never does',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('#play');
+            await page.waitForTimeout(1500);
+            await page.click('#play');
+
+            const started = (await audioSpy(page)).nodes
+                .filter((n) => n.node === 'oscillator' && n.started && typeof n.when === 'number');
+            // Matched on the kick's exact start frequency, not on "a sine above
+            // 100 Hz". The bass preset's sub-oscillator is also a sine, and the
+            // spy records the *undetuned* frequency — so at the default root a
+            // bass note reads 65 Hz and the threshold works, while transposing
+            // up one octave puts it at 131 Hz and every bass note would be
+            // counted as a kick. A check that silently misclassifies is worse
+            // than no check.
+            const kickHz = await page.evaluate(async () => (await import('/js/audio/Presets.js')).KICK.startFrequency);
+            const isKick = (n) => n.type === 'sine' && Math.abs(n.frequency - kickHz) < 0.01;
+            const kicks = started.filter(isKick);
+            if (kicks.length < 4) throw new Error(`${kicks.length} kicks in a bar — expected four to the floor`);
+
+            // Four to the floor: the gaps between kicks are all one beat.
+            const times = [...new Set(kicks.map((k) => k.when))].sort((a, b) => a - b);
+            const gaps = times.slice(1).map((t, i) => Number((t - times[i]).toFixed(4)));
+            if (new Set(gaps).size > 1) throw new Error(`the kick is not even: gaps ${gaps.join(', ')}`);
+
+            // And the rule the whole groove rests on: nothing pitched starts
+            // where a kick does.
+            const kickTimes = new Set(times.map((t) => t.toFixed(4)));
+            const collisions = started
+                .filter((n) => !isKick(n))
+                .filter((n) => kickTimes.has(n.when.toFixed(4)));
+            if (collisions.length > 0) throw new Error(`${collisions.length} bass notes started on a kick step`);
+        },
+    },
+    {
+        name: 'the kick mutes and unmutes while playing, leaving the bass alone',
+        async run(page) {
+            await page.click('#play');
+            await page.waitForTimeout(300);
+            await page.click('#kick-mute');
+            await resetSpy(page);
+            await page.waitForTimeout(1400);
+
+            const kickHz = await page.evaluate(async () => (await import('/js/audio/Presets.js')).KICK.startFrequency);
+            const isKick = (n) => n.type === 'sine' && Math.abs(n.frequency - kickHz) < 0.01;
+            const muted = (await audioSpy(page)).nodes
+                .filter((n) => n.node === 'oscillator' && n.started);
+            const kicks = muted.filter(isKick);
+            if (kicks.length > 0) throw new Error(`${kicks.length} kicks sounded while muted`);
+            // The bass must be untouched — muting is not a transport control.
+            if (muted.length === 0) throw new Error('muting the kick silenced the bass too');
+
+            await page.click('#kick-mute');
+            await resetSpy(page);
+            await page.waitForTimeout(1400);
+            const back = (await audioSpy(page)).nodes
+                .filter((n) => n.node === 'oscillator' && n.started).filter(isKick);
+            if (back.length === 0) throw new Error('the kick did not come back when unmuted');
+
+            await page.click('#play');
+            const pressed = await page.getAttribute('#kick-mute', 'aria-pressed');
+            if (pressed !== 'true') throw new Error(`the kick toggle reads aria-pressed=${pressed} when sounding`);
         },
     },
     {

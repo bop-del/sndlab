@@ -1,7 +1,7 @@
 import { DEFAULT_BPM, createClock, secondsPerStep } from '../audio/Clock.js';
 import { AudioEngine } from '../audio/AudioEngine.js';
 import { SCALES } from '../theory/Scales.js';
-import { generateBass } from '../theory/Generator.js';
+import { generateBass, isKickStep } from '../theory/Generator.js';
 
 // Play, stop and tempo — the controls that turn a generated pattern into
 // something you can hear loop.
@@ -22,6 +22,10 @@ export const Transport = {
     bpm: DEFAULT_BPM,
     root: 60,
     scale: null,
+    // A control, not state: the ticket is explicit that this does not go in the
+    // URL. Muting the kick is something you do for a moment while judging the
+    // line's pitch content, not a property of the line worth sharing.
+    kickMuted: false,
 
     init(container) {
         const play = document.createElement('button');
@@ -42,6 +46,23 @@ export const Transport = {
         reading.className = 'tempo-reading';
         const showTempo = () => { reading.textContent = `${tempo.value} BPM`; };
         showTempo();
+
+        const kick = document.createElement('button');
+        kick.id = 'kick-mute';
+        kick.type = 'button';
+        kick.textContent = 'Kick';
+        // Pressed means *sounding*, the same way a latched chord pad reads —
+        // not "muted", which would invert the meaning of every other toggle in
+        // the app.
+        kick.setAttribute('aria-pressed', 'true');
+
+        kick.addEventListener('click', () => {
+            this.kickMuted = !this.kickMuted;
+            kick.setAttribute('aria-pressed', String(!this.kickMuted));
+            // Nothing else to do: the next scheduled downbeat reads the flag.
+            // Muting cannot disturb the bass, because it does not touch the
+            // clock, the pattern or anything already scheduled.
+        });
 
         play.addEventListener('click', () => {
             if (this.clock?.running) this.stop(); else this.start();
@@ -66,7 +87,7 @@ export const Transport = {
 
         const row = document.createElement('div');
         row.className = 'transport';
-        row.append(play, field, reading);
+        row.append(play, kick, field, reading);
         container.replaceChildren(row);
 
         // Blur stops the transport as well as the held notes. A loop that keeps
@@ -117,6 +138,11 @@ export const Transport = {
     },
 
     playStep(step, when) {
+        // The kick first, and independent of the pattern: it is four to the
+        // floor whatever the bass is doing, and the gap the bass leaves on
+        // these steps is only audible as groove because this lands in it.
+        if (isKickStep(step) && !this.kickMuted) AudioEngine.kickAt(when);
+
         const cell = this.pattern?.steps[step];
         if (!cell || cell.gate !== 'note') return;
         // Held so stop() can silence the loop without reaching for every voice

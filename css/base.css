@@ -277,9 +277,46 @@ h1 {
     border-color: var(--accent);
 }
 
-#play:focus-visible {
+#play:focus-visible,
+#kick-mute:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+/* The kick toggle. Smaller than Play — it is set while listening rather than
+   played, and it must not compete with the control that starts everything.
+   Pressed means *sounding*, like a latched chord pad: a toggle that lit up to
+   mean "off" would invert what every other button here means. */
+#kick-mute {
+    font: inherit;
+    font-size: .85rem;
+    padding: .4rem .7rem;
+    color: var(--fg);
+    background: #23232e;
+    border: 1px solid #33333f;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#kick-mute:hover { background: #2b2b38; }
+
+/* Outlined rather than filled. Sounding is this button's resting state, and a
+   filled accent here pulled the eye away from Play — the control that is
+   actually pressed — every time the app was opened. The fill is reserved for
+   things that are *on because you turned them on*: a latched pad, the drone,
+   the transpose. */
+#kick-mute[aria-pressed="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Muted: visibly off rather than merely un-lit, so a glance answers "why is
+   there no kick?"
+   The muted colour alone, without an opacity on top of it. Both together
+   measured 2.75:1 against the button ground — below the 3:1 floor for UI text,
+   and unreadable is not the same as off. The colour alone is 4.58:1. */
+#kick-mute[aria-pressed="false"] {
+    color: var(--muted);
 }
 
 /* Tabular, so the row does not jog as the number changes under a dragging

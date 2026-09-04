@@ -1,5 +1,5 @@
 // Web Audio API directly — no framework, no dependency.
-import { presetById } from './Presets.js';
+import { KICK, presetById } from './Presets.js';
 
 // Equal temperament, A4 = 440 Hz at MIDI 69. Pitch conversion lives here
 // because it is audio domain knowledge: a second sound source must not
@@ -34,6 +34,9 @@ export const AudioEngine = {
     // sounding, not just the next note.
     filter: null,
     reverb: null,
+    // The last node before the destination. The kick connects here, past the
+    // player's filter but still under the limiter.
+    limiter: null,
 
     // Create the AudioContext on a user gesture only (autoplay policy).
     //
@@ -287,10 +290,28 @@ export const AudioEngine = {
             // is quiet rather than wrong.
             const floor = holdThroughAttack ? now + attack : now;
             const end = Math.max(requested, floor);
+
             // Cancel the attack first: releasing mid-attack otherwise ramps
             // from a value the scheduler has not reached yet, which clicks.
             gain.gain.cancelScheduledValues(end);
-            gain.gain.setValueAtTime(Math.max(gain.gain.value, SILENCE), end);
+
+            // What the envelope is worth at `end`, computed rather than read.
+            //
+            // `gain.gain.value` is the level *now*, and for a scheduled note
+            // `end` is in the future — so reading it pins a value the ramp has
+            // not reached, and the envelope jumps there instead of continuing.
+            // For a bass 16th that jump was a step up: the note re-attacked at
+            // full peak on top of its own decaying oscillator and rendered at
+            // 1.23, thirty-two clipped samples per note. The limiter cannot
+            // catch it for the reason issue #25 records — it tracks a smoothed
+            // envelope, not sample peaks.
+            //
+            // A held key is unaffected either way, because `end` is genuinely
+            // now for a finger leaving a key. Only the clock's path is in the
+            // future, and only it was clipping.
+            const elapsed = end - now;
+            const level = elapsed >= attack ? peak : peak * (elapsed / attack);
+            gain.gain.setValueAtTime(Math.max(level, SILENCE), end);
             gain.gain.exponentialRampToValueAtTime(SILENCE, end + release);
             for (const osc of oscillators) osc.stop(end + release);
         };
@@ -304,6 +325,52 @@ export const AudioEngine = {
 
         this.voices.add(voice);
         return voice;
+    },
+
+    /**
+     * The kick: one thump at a given time on the audio clock.
+     *
+     * Deliberately not a voice. It takes no MIDI note, cannot be held, and is
+     * not added to `this.voices` — nothing can release it early because it ends
+     * itself, and stopAll() has no business silencing a percussive hit that is
+     * already over. It is also not tracked by the transport's `sounding` set
+     * for the same reason.
+     *
+     * It bypasses the shared filter and goes straight to the limiter's input
+     * side of the chain. The shared filter is the player's control: sweeping the
+     * cutoff down to hear a pad darken would also swallow the kick, and a drum
+     * that disappears when you move a synth control is a bug the player would
+     * blame on the filter.
+     */
+    kickAt(when) {
+        const ctx = this.ensureContext();
+        this.input(); // builds the chain if this is the first sound
+
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        // Assigned as well as scheduled. Scheduled automation does not move the
+        // param's own `value`, which stays at the 440 Hz default — so anything
+        // reading the node afterwards (a check, a debugger) would be told this
+        // oscillator is an A above middle C rather than a kick.
+        osc.frequency.value = KICK.startFrequency;
+        // The pitch drop, which is what makes it a kick rather than a low beep.
+        // Exponential, because pitch is heard logarithmically — a linear fall
+        // sounds like it stalls halfway down.
+        osc.frequency.setValueAtTime(KICK.startFrequency, when);
+        osc.frequency.exponentialRampToValueAtTime(KICK.frequency, when + KICK.pitchDecay);
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, when);
+        gain.gain.linearRampToValueAtTime(KICK.peak, when + KICK.attack);
+        gain.gain.exponentialRampToValueAtTime(SILENCE, when + KICK.decay);
+
+        // Past the shared filter, but still through the limiter — the one thing
+        // that must see it, since a kick under a bass note is where a pile-up
+        // would happen.
+        osc.connect(gain).connect(this.limiter);
+        osc.start(when);
+        osc.stop(when + KICK.decay + 0.02);
+        return osc;
     },
 
     // Silence everything currently sounding. The engine's own last resort: it
