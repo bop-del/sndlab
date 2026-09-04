@@ -319,6 +319,24 @@ h1 {
     color: var(--muted);
 }
 
+/* The genre select, styled like the preset select below it — the same kind of
+   control doing the same kind of job. */
+#genre {
+    font: inherit;
+    font-size: .875rem;
+    color: var(--fg);
+    background: #23232e;
+    border: 1px solid #33333f;
+    border-radius: 6px;
+    padding: .3rem .45rem;
+    cursor: pointer;
+}
+
+#genre:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* Tabular, so the row does not jog as the number changes under a dragging
    finger. */
 .tempo-reading {

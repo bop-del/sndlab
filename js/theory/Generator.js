@@ -12,6 +12,7 @@
 // it, so expect the first lines to be wrong in ways no check can see.
 
 import { SCALES } from './Scales.js';
+import { STATIC_TONIC, chordAt, changesAfter } from './Progressions.js';
 
 /** One bar at 16th-note resolution. The TB-303's length, and both genres'. */
 export const STEPS = 16;
@@ -39,6 +40,11 @@ export const isKickStep = (step) => KICK_STEPS.includes(step % STEPS);
  */
 export const BASS_GRIDS = {
     goa: [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15],
+    // Melodic techno's default is looser: the offbeat 8ths, four to the bar on
+    // the "and". Same rule underneath — the kick step stays empty — at a
+    // quarter of the density. This is a genre *parameter*, not a second
+    // algorithm: the loop below does not know which grid it was handed.
+    'melodic-techno': [2, 6, 10, 14],
 };
 
 /**
@@ -85,15 +91,40 @@ const rest = () => ({ gate: 'rest', degree: 0, octave: 0, accent: false, slide: 
  * already follows. `root` is in the signature because the caller thinks in
  * terms of a key, and because the lead generator will need it.
  */
-export function generateBass({ scale = SCALES[0], root = 60, genre = 'goa', random = Math.random } = {}) {
+export function generateBass({
+    scale = SCALES[0],
+    root = 60,
+    genre = 'goa',
+    progression = STATIC_TONIC,
+    bar = 0,
+    random = Math.random,
+} = {}) {
     const grid = BASS_GRIDS[genre] ?? BASS_GRIDS.goa;
     const steps = Array.from({ length: STEPS }, rest);
+
+    // The bass does not follow the chord. This is the clearest divergence from
+    // generic techno and the research is emphatic about it: in melodic techno
+    // the chords move *above* a bass that stays largely on the tonic. What the
+    // bass does instead is announce the change — see the walkdown below.
+    //
+    // So the progression reaches the pitch loop through exactly one value: the
+    // last bar before a change gets a walkdown, and every other bar is written
+    // as if the progression did not exist. That is the one-generator bet in one
+    // line — Goa never walks down because its progression never changes, which
+    // falls out of `changesAfter` rather than out of a branch on genre.
+    const walkingDown = changesAfter(progression, bar);
+    const target = chordAt(progression, bar + 1);
 
     for (const step of grid) {
         // The kick slot is inviolable. The grids never include it, but a bad
         // genre template must not be able to break the one rule that matters.
         if (isKickStep(step)) continue;
-        if (random() >= DENSITY) continue;
+        // A walkdown always sounds in full. Density decides which *optional*
+        // steps fill, and the approach to a chord change is not optional — a
+        // walkdown with a hole in it announces the change less clearly than no
+        // walkdown at all, which is the one job it has.
+        const walkStep = walkingDown && step >= STEPS / 2;
+        if (!walkStep && random() >= DENSITY) continue;
 
         // A scale shorter than seven notes has no sixth degree to reach for, so
         // the colour tones are filtered against the scale rather than assumed.
@@ -101,9 +132,7 @@ export function generateBass({ scale = SCALES[0], root = 60, genre = 'goa', rand
 
         steps[step] = {
             gate: 'note',
-            degree: random() < ROOT_SHARE || colours.length === 0
-                ? 0
-                : colours[Math.floor(random() * colours.length)],
+            degree: pickDegree({ step, grid, colours, walkingDown, target, scale, random }),
             // One octave of range, and it stays there. The hypnotic effect
             // depends on pitch being static most of the time; an octave drop is
             // a once-every-few-bars event, not a per-step decision.
@@ -114,6 +143,55 @@ export function generateBass({ scale = SCALES[0], root = 60, genre = 'goa', rand
     }
 
     return clearDanglingSlides({ lane: 'bass', steps });
+}
+
+/**
+ * Which degree a step sounds.
+ *
+ * ~70% root, the rest a colour tone — except in the last quarter of a bar that
+ * ends before a chord change, where the line walks down toward the chord
+ * coming next. The research's worked example in A minor:
+ *
+ *     bar 1   A A A A
+ *     bar 2   A A A A
+ *     bar 3   A A E E     ← the fifth, as a lift
+ *     bar 4   A A G F     ← stepwise walkdown, pre-announcing the next chord
+ *
+ * The walkdown is described as a chord-*transition* device rather than a
+ * countermelody: the bass is not following the harmony, it is signposting it.
+ * Steps outside that window are written exactly as they were before this
+ * ticket, which is why Goa is unchanged — its progression never changes, so
+ * `walkingDown` is never true and this reduces to the original line.
+ */
+function pickDegree({ step, grid, colours, walkingDown, target, scale, random }) {
+    if (walkingDown) {
+        // The last two beats, not the last one. The worked example spends a
+        // whole half-bar on the approach — `A A G F`, three notes arriving on
+        // the next chord — and at melodic techno's offbeat-8th density a
+        // quarter-bar window contains a single step, which is a jump rather
+        // than a walk. Half the bar is still a tail: a walkdown that started on
+        // beat one would be a countermelody, which the research says the bass
+        // is not.
+        const tail = grid.filter((s) => s >= STEPS / 2);
+        const place = tail.indexOf(step);
+        if (place !== -1) {
+            // Approach the next chord's root from above, one scale step per
+            // note, *arriving on it* — the "stepwise walkdown" of the example,
+            // where the last note of the bar is the chord that follows.
+            //
+            // `tail.length - 1 - place` rather than `tail.length - place`: the
+            // final step must be the target itself, not one above it. Getting
+            // this wrong makes a descent that stops just short, which is the
+            // one thing a walkdown must not do — it announces a chord change
+            // by landing on it.
+            const above = tail.length - 1 - place;
+            const from = target + above;
+            return ((from % scale.steps.length) + scale.steps.length) % scale.steps.length;
+        }
+    }
+
+    if (colours.length === 0) return 0;
+    return random() < ROOT_SHARE ? 0 : colours[Math.floor(random() * colours.length)];
 }
 
 /**

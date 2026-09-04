@@ -2261,6 +2261,48 @@ const checks = [
         },
     },
     {
+        name: 'stopping and playing again restarts the loop at its first bar',
+        async run(page) {
+            // The bar only advances on a step 0 that follows another step, and
+            // the flag saying so has to be cleared per run. Left set, a restart
+            // advanced past bar 0 before playing it — invisible in Goa, where
+            // the loop is one bar, and a skipped bar in melodic techno.
+            const bars = await page.evaluate(async () => {
+                const { Transport } = await import('/js/ui/Transport.js');
+                const seen = [];
+                Transport.genre = 'melodic-techno';
+                Transport.pattern = null;
+                Transport.bars = [];
+                Transport.progression = null;
+                // Driven by hand rather than by the clock: start() schedules
+                // step 0 itself, so letting it run would consume the very
+                // transition this is trying to observe.
+                Transport.start();
+                Transport.stop();
+                seen.push(Transport.bar);
+
+                // A partial pass, so `bar` lands somewhere other than 0 before
+                // the restart — a full pass would wrap back to 0 and a restart
+                // that failed to reset would look identical to one that worked.
+                Transport.startedBar = true;
+                Transport.playStep(0, 0);
+                seen.push(Transport.bar);
+
+                Transport.start();
+                Transport.stop();
+                seen.push(Transport.bar);
+                Transport.genre = 'goa';
+                Transport.pattern = null;
+                Transport.bars = [];
+                Transport.progression = null;
+                return seen;
+            });
+            if (bars[0] !== 0) throw new Error(`the loop started on bar ${bars[0]}`);
+            if (bars[1] === 0) throw new Error('the loop never advanced, so this check proves nothing');
+            if (bars[2] !== 0) throw new Error(`after stop and play the loop restarted on bar ${bars[2]}, not 0`);
+        },
+    },
+    {
         name: 'stopping the transport leaves a held chord alone',
         async run(page) {
             // The bug this guards: stop() reaching for every voice in the

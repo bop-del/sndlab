@@ -23,6 +23,14 @@ import {
     isKickStep,
 } from '../js/theory/Generator.js';
 import { LOOKAHEAD, createClock, secondsPerStep } from '../js/audio/Clock.js';
+import {
+    PROGRESSIONS,
+    STATIC_TONIC,
+    changesAfter,
+    chordAt,
+    loopBars,
+    pickProgression,
+} from '../js/theory/Progressions.js';
 
 const E = 64; // E4
 const C = 60; // middle C
@@ -284,6 +292,180 @@ check('the rhythm is a template, not a random layer', () => {
     }
     for (const slot of slots) {
         if (!BASS_GRIDS.goa.includes(slot)) throw new Error(`step ${slot} sounded off-grid`);
+    }
+});
+
+// ─── Harmony, and the one-generator bet ──────────────────────────────────────
+// ADR 0007 stakes the design on Goa being melodic techno's algorithm with the
+// progression set to one chord. These assert that the two genres differ by the
+// values they are handed and not by the path they take.
+
+check('Goa is one chord that never changes', () => {
+    const goa = pickProgression({ genre: 'goa' });
+    if (goa.degrees.length !== 1) throw new Error(`Goa has ${goa.degrees.length} chords, expected one`);
+    if (goa.degrees[0] !== 0) throw new Error('the one Goa chord is not the tonic');
+    for (let bar = 0; bar < 64; bar++) {
+        if (chordAt(goa, bar) !== 0) throw new Error(`Goa moved off the tonic at bar ${bar}`);
+        // The whole bet: no chord change means no walkdown, with no branch on
+        // genre anywhere. If this ever became true the degenerate case would
+        // have stopped being degenerate.
+        if (changesAfter(goa, bar)) throw new Error(`Goa's progression changed after bar ${bar}`);
+    }
+});
+
+check('melodic techno moves at 2 to 4 bars per chord', () => {
+    for (const progression of PROGRESSIONS) {
+        if (progression.barsPerChord < 2 || progression.barsPerChord > 4) {
+            throw new Error(`${progression.label} is ${progression.barsPerChord} bars/chord, wanted 2–4`);
+        }
+        if (progression.degrees.length !== 4) {
+            throw new Error(`${progression.label} has ${progression.degrees.length} chords, expected a 4-chord loop`);
+        }
+        if (progression.degrees[0] !== 0) throw new Error(`${progression.label} does not start on the tonic`);
+        // Every chord is a degree of the scale, so the table works in any key
+        // and any scale sndlab ships.
+        for (const degree of progression.degrees) {
+            if (!Number.isInteger(degree) || degree < 0 || degree > 6) {
+                throw new Error(`${progression.label} names degree ${degree}, which is not a scale degree`);
+            }
+        }
+        // 8 or 16 bars, per the research.
+        const loop = progression.degrees.length * progression.barsPerChord;
+        if (loop !== 8 && loop !== 16) throw new Error(`${progression.label} loops over ${loop} bars, expected 8 or 16`);
+    }
+});
+
+check('a chord change is announced by a walkdown, and only then', () => {
+    const progression = PROGRESSIONS[0]; // i–VI–III–VII, 2 bars per chord
+    for (let bar = 0; bar < 8; bar++) {
+        const steps = generateBass({
+            scale: minor, genre: 'melodic-techno', progression, bar, random: pinned(bar + 1),
+        }).steps;
+        const tail = steps.slice(STEPS / 2).filter((step) => step.gate === 'note');
+        const degrees = tail.map((step) => step.degree);
+
+        if (!changesAfter(progression, bar)) continue;
+
+        // The half-bar before a change is a descent arriving on the next
+        // chord's root — the research's "A A G F", stepwise and pre-announcing.
+        const target = chordAt(progression, bar + 1);
+        if (degrees.at(-1) !== target) {
+            throw new Error(`bar ${bar} ended on degree ${degrees.at(-1)}, not the coming chord's ${target}`);
+        }
+        // Descending *by scale step*, which is not the same as descending
+        // numerically: degree 0 to degree 6 is one step down into the octave
+        // below, and reads as a fall. Comparing the indices directly would call
+        // that an ascent and demand a walkdown the music does not want.
+        for (let i = 1; i < degrees.length; i++) {
+            const fell = (degrees[i - 1] - degrees[i] + minor.steps.length) % minor.steps.length;
+            if (fell !== 1) {
+                throw new Error(`bar ${bar} does not walk down one step at a time: ${degrees.join(' → ')}`);
+            }
+        }
+    }
+});
+
+check('the bass does not follow the chord roots', () => {
+    // The clearest divergence from generic techno: in melodic techno the chords
+    // move above a bass that stays largely on the tonic, and the bass is a
+    // chord-transition device rather than a countermelody.
+    //
+    // Measured two ways, because one number alone hides the other. An earlier
+    // version of this check excluded walkdown bars, which are exactly the bars
+    // that move the figure — so it re-asserted #30's constant on a code path
+    // #34 never touched and could not fail.
+    const progression = PROGRESSIONS[0];
+    const tally = { steady: { notes: 0, root: 0 }, all: { notes: 0, root: 0 } };
+    for (let bar = 0; bar < 8; bar++) {
+        for (let seed = 1; seed <= 60; seed++) {
+            for (const step of generateBass({
+                scale: minor, genre: 'melodic-techno', progression, bar, random: pinned(bar * 100 + seed),
+            }).steps) {
+                if (step.gate !== 'note') continue;
+                tally.all.notes++;
+                if (step.degree === 0) tally.all.root++;
+                if (changesAfter(progression, bar)) continue;
+                tally.steady.notes++;
+                if (step.degree === 0) tally.steady.root++;
+            }
+        }
+    }
+
+    // Away from the chord changes the bass is the same ~70% root as Goa's.
+    const steady = tally.steady.root / tally.steady.notes;
+    if (Math.abs(steady - ROOT_SHARE) > 0.05) {
+        throw new Error(`root share between changes is ${steady.toFixed(3)}, expected ~${ROOT_SHARE}`);
+    }
+
+    // Across the whole progression it is lower, and that is the walkdown's
+    // cost rather than a fault: a quarter of all notes are the approach to a
+    // chord change, and none of those are the tonic. Asserted so the cost stays
+    // visible — if it drifts, either the walkdown or the density has moved.
+    const overall = tally.all.root / tally.all.notes;
+    if (Math.abs(overall - 0.575) > 0.05) {
+        throw new Error(`root share across the progression is ${overall.toFixed(3)}, expected ~0.575`);
+    }
+
+    // The claim that actually matters: the bass does not chase the harmony.
+    // A bass tracking each chord would sit on that chord's root, so the tonic
+    // share on non-tonic chords would collapse.
+    if (overall < 0.4) {
+        throw new Error(`root share ${overall.toFixed(3)} — the bass is following the chord roots`);
+    }
+});
+
+check('both genres keep every invariant the bass generator guarantees', () => {
+    // Whatever else changed, the rules from #30 hold in both genres.
+    for (const [genre, progression] of [['goa', STATIC_TONIC], ['melodic-techno', PROGRESSIONS[0]]]) {
+        for (let bar = 0; bar < 8; bar++) {
+            for (let seed = 1; seed <= 30; seed++) {
+                const { steps } = generateBass({
+                    scale: minor, genre, progression, bar, random: pinned(bar * 50 + seed),
+                });
+                steps.forEach((step, index) => {
+                    if (step.gate !== 'note') return;
+                    if (isKickStep(index)) throw new Error(`${genre}: a note landed on kick step ${index}`);
+                    if (step.degree >= minor.steps.length) throw new Error(`${genre}: degree ${step.degree} is off the scale`);
+                    if (step.octave !== 0) throw new Error(`${genre}: a step left the octave`);
+                    if (step.slide && steps[(index + 1) % STEPS].gate !== 'note') {
+                        throw new Error(`${genre}: a slide points at a rest`);
+                    }
+                });
+            }
+        }
+    }
+});
+
+check('melodic techno is the offbeat 8ths, Goa the rolling 16ths', () => {
+    const density = (genre, progression) => {
+        let notes = 0;
+        for (let seed = 1; seed <= 40; seed++) {
+            notes += generateBass({ scale: minor, genre, progression, bar: 0, random: pinned(seed) })
+                .steps.filter((step) => step.gate === 'note').length;
+        }
+        return notes / 40;
+    };
+    const goa = density('goa', STATIC_TONIC);
+    const techno = density('melodic-techno', PROGRESSIONS[0]);
+    // Four to the bar against twelve: the genre difference is a density
+    // parameter, which is the point.
+    if (techno > 4) throw new Error(`melodic techno sounds ${techno.toFixed(1)} steps a bar, expected the four offbeat 8ths`);
+    if (goa < 8) throw new Error(`Goa sounds only ${goa.toFixed(1)} steps a bar, expected the rolling 16ths`);
+});
+
+check('the loop is the progression length, and one bar for a static tonic', () => {
+    // Owned by Progressions rather than computed by the caller: multiplying by
+    // an Infinite barsPerChord needs a special case for Goa wherever it is
+    // done, which is a branch on genre by proxy.
+    if (loopBars(STATIC_TONIC) !== 1) throw new Error(`Goa loops over ${loopBars(STATIC_TONIC)} bars, expected one`);
+    for (const progression of PROGRESSIONS) {
+        const bars = loopBars(progression);
+        if (bars !== 8 && bars !== 16) throw new Error(`${progression.label} loops over ${bars} bars, expected 8 or 16`);
+        // And the loop really does come round: the chord at bar 0 and at one
+        // full loop later must be the same.
+        if (chordAt(progression, 0) !== chordAt(progression, bars)) {
+            throw new Error(`${progression.label} does not repeat after ${bars} bars`);
+        }
     }
 });
 

@@ -8,6 +8,7 @@ import { MUSE_PRESETS } from '../audio/Presets.js';
 const VOICE_CAP = 8;
 import { SCALES } from '../theory/Scales.js';
 import { generateBass, isKickStep } from '../theory/Generator.js';
+import { loopBars, pickProgression } from '../theory/Progressions.js';
 
 // Play, stop and tempo — the controls that turn a generated pattern into
 // something you can hear loop.
@@ -36,6 +37,27 @@ export const Transport = {
     // URL. Muting the kick is something you do for a moment while judging the
     // line's pitch content, not a property of the line worth sharing.
     kickMuted: false,
+    // Which genre the next generation follows. The ticket is explicit that a
+    // switch takes effect on the *next* generation rather than rewriting the
+    // line under the player — changing genre mid-bar would be a different
+    // feature, and a startling one.
+    genre: 'goa',
+    progression: null,
+    // One pattern per bar of the progression, generated once and then looped.
+    //
+    // Not regenerated per bar: a line that re-rolls every bar never repeats,
+    // and #31 shipped — and Boris accepted — a loop you can hear come round.
+    // Goa's progression is one chord, so this is a single bar cycling exactly
+    // as before; melodic techno's is 8 or 16, so the loop is that long.
+    bars: [],
+    bar: 0,
+    // Whether the current run has already played its first step. The bar only
+    // advances on a step 0 that follows another step — otherwise the very first
+    // step of a run would advance past bar 0 before playing it. Reset per run,
+    // not per object: leaving it set made stop-then-play restart on bar 2 of
+    // the loop, silent in Goa where the loop is one bar and audible in melodic
+    // techno where it is eight.
+    startedBar: false,
 
     init(container) {
         const play = document.createElement('button');
@@ -56,6 +78,24 @@ export const Transport = {
         reading.className = 'tempo-reading';
         const showTempo = () => { reading.textContent = `${tempo.value} BPM`; };
         showTempo();
+
+        const genre = document.createElement('select');
+        genre.id = 'genre';
+        genre.append(new Option('Goa', 'goa'), new Option('Melodic techno', 'melodic-techno'));
+
+        genre.addEventListener('change', () => {
+            this.genre = genre.value;
+            // Dropped, not rewritten: the next start picks a progression and
+            // rolls a line for the genre now selected. A running loop keeps
+            // playing what it has.
+            this.pattern = null;
+            this.progression = null;
+            this.bars = [];
+        });
+
+        const genreField = document.createElement('label');
+        genreField.className = 'control';
+        genreField.append('Genre', genre);
 
         const kick = document.createElement('button');
         kick.id = 'kick-mute';
@@ -97,7 +137,7 @@ export const Transport = {
 
         const row = document.createElement('div');
         row.className = 'transport';
-        row.append(play, kick, field, reading);
+        row.append(play, kick, genreField, field, reading);
         container.replaceChildren(row);
 
         // Blur stops the transport as well as the held notes. A loop that keeps
@@ -120,7 +160,11 @@ export const Transport = {
 
     start() {
         const ctx = AudioEngine.ensureContext();
-        this.pattern ??= generateBass({ scale: this.scale, root: this.root });
+        this.progression ??= pickProgression({ genre: this.genre });
+        if (this.bars.length === 0) this.bars = this.generate();
+        this.bar = 0;
+        this.startedBar = false;
+        this.pattern = this.bars[0];
 
         this.clock ??= createClock({
             // The engine's clock, read through one function and nowhere else.
@@ -148,7 +192,34 @@ export const Transport = {
         this.sounding.clear();
     },
 
+    /**
+     * The whole loop: one pattern per bar of the progression.
+     *
+     * Its length is the progression's own — one bar for Goa's static tonic,
+     * eight or sixteen for melodic techno. Every bar is written by the same
+     * call; the only thing that differs between them is which chord is coming
+     * next, which is what decides whether the bar walks down.
+     */
+    generate() {
+        return Array.from({ length: loopBars(this.progression) }, (_, bar) => generateBass({
+            scale: this.scale,
+            root: this.root,
+            genre: this.genre,
+            progression: this.progression,
+            bar,
+        }));
+    },
+
     playStep(step, when) {
+        // Advance to the next bar of the loop at each bar line. The loop is
+        // the progression's length, so Goa cycles one bar and melodic techno
+        // eight or sixteen — and either way it comes round.
+        if (step === 0 && this.startedBar) {
+            this.bar = (this.bar + 1) % this.bars.length;
+            this.pattern = this.bars[this.bar];
+        }
+        this.startedBar = true;
+
         // The kick first, and independent of the pattern: it is four to the
         // floor whatever the bass is doing, and the gap the bass leaves on
         // these steps is only audible as groove because this lands in it.

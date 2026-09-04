@@ -6,4 +6,4 @@
 // because GitHub Pages takes a minute or three to catch up. Counting builds,
 // not releases: no minor-or-patch judgement per commit, and it only ever goes
 // up, so a lower number on screen than in the repo means stale CDN, full stop.
-export const VERSION = 'b40';
+export const VERSION = 'b41';
