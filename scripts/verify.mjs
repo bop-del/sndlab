@@ -2315,6 +2315,56 @@ const checks = [
         },
     },
     {
+        name: 'the loop the transport plays is long enough to hear the lead precess',
+        async run(page) {
+            // The check this ticket was missing. A theory check already asserts
+            // that generateLead produces seven distinct bars — and it does. It
+            // never asked whether the *transport* requests them, and it did
+            // not: Goa's harmony is one chord, so the loop was one bar and the
+            // precession was generated and thrown away. Boris heard "it just
+            // repeats" while every check was green.
+            const measured = await page.evaluate(async () => {
+                const { Transport } = await import('/js/ui/Transport.js');
+                const { LEAD_VOICES } = await import('/js/theory/Lead.js');
+                const shape = (pattern) => JSON.stringify(
+                    pattern.steps.map((step) => (step.gate === 'note' ? step.degree : '.')));
+
+                const saved = Transport.genre;
+                Transport.genre = 'goa';
+                Transport.pattern = null;
+                Transport.lead = null;
+                Transport.bars = [];
+                Transport.leadBars = [];
+                Transport.progression = null;
+                Transport.start();
+                Transport.stop();
+
+                const result = {
+                    motif: LEAD_VOICES.goa.motif,
+                    bars: Transport.leadBars.length,
+                    distinct: new Set(Transport.leadBars.map(shape)).size,
+                };
+
+                Transport.genre = saved;
+                Transport.pattern = null;
+                Transport.lead = null;
+                Transport.bars = [];
+                Transport.leadBars = [];
+                Transport.progression = null;
+                return result;
+            });
+
+            if (measured.bars < measured.motif) {
+                throw new Error(`the loop is ${measured.bars} bars against a ${measured.motif}-note motif — the precession cannot be heard`);
+            }
+            // And the bars it plays really do differ: a long loop of identical
+            // bars would satisfy the length and still just repeat.
+            if (measured.distinct < measured.motif - 1) {
+                throw new Error(`only ${measured.distinct} distinct bars in a ${measured.bars}-bar loop`);
+            }
+        },
+    },
+    {
         name: 'stopping and playing again restarts the loop at its first bar',
         async run(page) {
             // The bar only advances on a step 0 that follows another step, and

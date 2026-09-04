@@ -16,7 +16,7 @@ const VOICE_CAP = 8;
 export const LEAD_OCTAVES = 3;
 import { SCALES } from '../theory/Scales.js';
 import { generateBass, isKickStep } from '../theory/Generator.js';
-import { generateLead } from '../theory/Lead.js';
+import { LEAD_VOICES, generateLead } from '../theory/Lead.js';
 import { loopBars, pickProgression } from '../theory/Progressions.js';
 
 // Play, stop and tempo — the controls that turn a generated pattern into
@@ -221,6 +221,23 @@ export const Transport = {
     },
 
     /**
+     * How many bars the loop runs before it repeats.
+     *
+     * The longest any lane needs, not the progression's alone. Goa's harmony is
+     * one chord, so `loopBars` says one bar — and a one-bar loop threw away the
+     * lead's precession entirely: its seven-note cell only shows its shape
+     * across seven bars, and the transport was never asking for bar 1. The
+     * generator could produce them; nothing requested them.
+     *
+     * Melodic techno is unaffected: its progression spans 8 or 16 bars, which
+     * already exceeds its bar-aligned lead motif.
+     */
+    loopLength() {
+        const voice = LEAD_VOICES[this.genre] ?? LEAD_VOICES.goa;
+        return Math.max(loopBars(this.progression), voice.motif);
+    },
+
+    /**
      * The whole loop: one pattern per bar of the progression.
      *
      * Its length is the progression's own — one bar for Goa's static tonic,
@@ -229,7 +246,7 @@ export const Transport = {
      * next, which is what decides whether the bar walks down.
      */
     generate(write) {
-        return Array.from({ length: loopBars(this.progression) }, (_, bar) => write({
+        return Array.from({ length: this.loopLength() }, (_, bar) => write({
             scale: this.scale,
             root: this.root,
             genre: this.genre,
