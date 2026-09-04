@@ -416,15 +416,49 @@ const checks = [
             // Set the root rather than inheriting it: an absolute MIDI number
             // asserted against whatever the previous check left behind fails
             // for reasons that have nothing to do with the drone.
+            //
+            // C2 is the keyboard's lowest key, so at the default transpose the
+            // drone lights the very bottom of the range. One position down it
+            // sounds C1, off the end of a keyboard that does not scroll, and
+            // lights nothing — see the check below, which pins that down rather
+            // than leaving it to be rediscovered as a bug.
             await page.selectOption('#root', '60');
             await page.click('#drone');
             try {
                 const lit = await litNotes(page);
-                if (String(lit) !== String([48])) throw new Error(`expected the root C3 lit, got [${lit}]`);
+                if (String(lit) !== String([36])) throw new Error(`expected the root C2 lit, got [${lit}]`);
             } finally {
                 await page.click('#drone');
             }
             if ((await litNotes(page)).length !== 0) throw new Error('stopping the drone left the key lit');
+        },
+    },
+    {
+        name: 'the drone button shows that it is on',
+        async run(page) {
+            // Every other check only ever asserts `drone--on` is *absent* — the
+            // strand checks, which want nothing lit. A drone that sounded
+            // without lighting its own button would pass all of them, and the
+            // screenshot is where that gets noticed, which is too late and
+            // depends on someone looking. Assert the lit state directly.
+            await page.click('#drone');
+            try {
+                const on = await page.$eval('#drone', (el) => ({
+                    lit: el.classList.contains('drone--on'),
+                    pressed: el.getAttribute('aria-pressed'),
+                }));
+                if (!on.lit) throw new Error('the drone is sounding but its button is not lit');
+                if (on.pressed !== 'true') throw new Error(`the lit drone reports aria-pressed=${on.pressed}`);
+            } finally {
+                await page.click('#drone');
+            }
+
+            const off = await page.$eval('#drone', (el) => ({
+                lit: el.classList.contains('drone--on'),
+                pressed: el.getAttribute('aria-pressed'),
+            }));
+            if (off.lit) throw new Error('the stopped drone is still lit');
+            if (off.pressed !== 'false') throw new Error(`the stopped drone reports aria-pressed=${off.pressed}`);
         },
     },
     {
@@ -1275,18 +1309,19 @@ const checks = [
         },
     },
     {
-        name: 'the pads and the drone follow the transpose, one octave below the rows',
+        name: 'the pads follow the transpose one octave below the rows, the drone two',
         async run(page) {
             try {
                 await page.selectOption('#root', '60');
                 await page.selectOption('#scale', 'phrygian');
 
-                // Default position: the rows start at C4, so harmony sits in C3.
+                // Default position: the rows start at C4, so the pads sit in C3
+                // and the drone an octave under them, in C2.
                 await resetSpy(page);
                 await page.click('#drone');
                 let sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
-                if (Math.abs(sounding[0].frequency - 131) > 1) {
-                    throw new Error(`expected the drone on C3 (~131 Hz), got ${sounding[0].frequency}`);
+                if (Math.abs(sounding[0].frequency - 65.4) > 1) {
+                    throw new Error(`expected the drone on C2 (~65.4 Hz), got ${sounding[0].frequency}`);
                 }
                 await page.click('#drone');
 
@@ -1295,8 +1330,8 @@ const checks = [
                 await resetSpy(page);
                 await page.click('#drone');
                 sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
-                if (Math.abs(sounding[0].frequency - 262) > 1) {
-                    throw new Error(`expected the drone to follow to C4 (~262 Hz), got ${sounding[0].frequency}`);
+                if (Math.abs(sounding[0].frequency - 131) > 1) {
+                    throw new Error(`expected the drone to follow to C3 (~131 Hz), got ${sounding[0].frequency}`);
                 }
                 await page.click('#drone');
 
@@ -1307,6 +1342,55 @@ const checks = [
                     throw new Error(`expected the triad at [60,63,67], got [${lit}]`);
                 }
                 await page.click('.pad[data-degree="0"]');
+            } finally {
+                await page.click('.transpose__button[data-octave="C4"]');
+            }
+        },
+    },
+    {
+        name: 'the drone sounds one octave below the chord root, at every transpose',
+        async run(page) {
+            // The relationship, not the pitches. The check above pins the drone
+            // to named notes, which says nothing about what it is an octave
+            // below — the pads could move and it would still pass. This asserts
+            // the interval directly: hold a chord and the drone together, and
+            // the lowest chord note must be exactly twice the drone's frequency.
+            //
+            // Both positions, because a relationship that holds at one is a
+            // coincidence. C5 rather than C3 for the second: at C3 the drone is
+            // MIDI 24, and rounding a ~32 Hz pitch to the nearest integer makes
+            // a 2:1 ratio hard to assert honestly.
+            try {
+                await page.selectOption('#root', '60');
+                await page.selectOption('#scale', 'phrygian');
+
+                for (const octave of ['C4', 'C5']) {
+                    await page.click(`.transpose__button[data-octave="${octave}"]`);
+                    await resetSpy(page);
+                    await page.click('#drone');
+                    await page.click('.pad[data-degree="0"]');
+
+                    const sounding = voicesIn(await audioSpy(page))
+                        .filter((v) => !v.stopped)
+                        .sort((a, b) => a.frequency - b.frequency);
+                    if (sounding.length !== 4) {
+                        throw new Error(`expected drone + triad = 4 notes at ${octave}, got ${sounding.length}`);
+                    }
+
+                    // Sorted, so [0] is the drone and [1] the chord's own root:
+                    // the pads build triads upward from theirs.
+                    const [drone, chordRoot] = sounding;
+                    const ratio = chordRoot.frequency / drone.frequency;
+                    if (Math.abs(ratio - 2) > 0.02) {
+                        throw new Error(
+                            `at ${octave} the drone (${drone.frequency} Hz) is not an octave below `
+                            + `the chord root (${chordRoot.frequency} Hz): ratio ${ratio.toFixed(3)}`,
+                        );
+                    }
+
+                    await page.click('.pad[data-degree="0"]');
+                    await page.click('#drone');
+                }
             } finally {
                 await page.click('.transpose__button[data-octave="C4"]');
             }
