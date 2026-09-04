@@ -145,18 +145,21 @@ export const MUSE_PRESETS = {
             { type: 'sine', detune: -1200, gain: 0.35 },
         ],
         attack: 0.002,
-        // Sustain 0 is the whole ticket: the note dies inside its own step
-        // instead of running into the next one, which is what makes a line roll
-        // rather than smear.
+        // A note that is over before the next step begins — that is the roll —
+        // but ended by its *gate*, not by decaying into silence.
         //
-        // 95ms, not the research's 60–80ms. At 138bpm a 16th is 109ms, so this
-        // is 87% of a step with 14ms of air. The documented range put it at 64%
-        // — inside the same document's "note length 50–75% of a 16th" window,
-        // and audibly too staccato when #33 was accepted by ear. The numbers
-        // are convergent forum folklore with no transcriptions behind them, and
-        // #28 said to expect exactly this.
-        decay: 0.095,
-        sustain: 0,
+        // The research says sustain 0 (§1, marked folklore). Tried, and wrong:
+        // an exponential to zero spends nearly all its time near the bottom, so
+        // the note was inaudible after ~40ms of its 109ms step whatever the
+        // decay was set to. Lengthening the decay 70ms → 95ms barely changed
+        // what could be heard, which is what ruled the decay out as the cause.
+        // A note silent for most of its own step is a click, not a roll.
+        //
+        // So: punch, settle to 12% of peak, hold, and let the gate cut it at
+        // 98ms. One note per step with silence between them, and a body while
+        // it lasts.
+        decay: 0.06,
+        sustain: 0.12,
         release: 0.03,
         // 0.11, not the Bass preset's 0.16. Staged lower because these notes
         // are sequenced rather than played: at 95ms a step they arrive often
