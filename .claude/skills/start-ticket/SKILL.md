@@ -109,13 +109,29 @@ Report, in one short block: the ticket, what the blockers were and that they
 are closed, the card's new status, the branch (or worktree path), and what it
 was cut from.
 
-Then stop. **Do not start implementing** — that is `/implement`, and it is a
-separate invocation so the plan can be read before code is written.
+Then **offer the next step, and stop**: *"Claimed and branched. Run
+`/implement <n>`?"* — one keystroke, but Boris's call.
+
+Offer rather than chain, for two reasons. A card in `Ready` means an agent can
+take the ticket **cold**; chaining hands `/implement` this session's whole
+context — board mechanics, git plumbing, whatever else was discussed — when a
+fresh window would serve it better. And this skill has just made three writes
+that are awkward to unpick (a claim, a commit, a push), which are worth seeing
+land before code starts.
+
+**Never offer the chain after creating a worktree.** The session has to move to
+the new directory first, and an `/implement` started here would build in the
+old one — on the wrong branch, which is the failure step 4 already warns about.
+Say the directory to move to, and stop.
+
+Whatever Boris picks, **do not start implementing in this invocation.**
 
 ## What not to do
 
 - Do not claim and then discover the ticket was blocked. Check first; a claim
   you have to undo is noise on the board.
 - Do not create a worktree by default. Branch is the common case.
+- Do not chain into `/implement` — offer it. Never even offer it after a
+  worktree.
 - Do not bump `js/version.js` here. Nothing has changed yet.
 - Do not add trailers to commits in this repo (`CLAUDE.md`).
