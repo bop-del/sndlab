@@ -22,6 +22,12 @@ import {
     generateBass,
     isKickStep,
 } from '../js/theory/Generator.js';
+import {
+    LEAD_VOICES,
+    PHRASE_BARS,
+    chordTones,
+    generateLead,
+} from '../js/theory/Lead.js';
 import { LOOKAHEAD, createClock, secondsPerStep } from '../js/audio/Clock.js';
 import {
     PROGRESSIONS,
@@ -292,6 +298,144 @@ check('the rhythm is a template, not a random layer', () => {
     }
     for (const slot of slots) {
         if (!BASS_GRIDS.goa.includes(slot)) throw new Error(`step ${slot} sounded off-grid`);
+    }
+});
+
+// ─── The lead ────────────────────────────────────────────────────────────────
+// Where ADR 0007's bet is under real strain. The bass mostly ignores the
+// progression, so one algorithm serving both genres was barely tested by #34.
+// The lead genuinely diverges — and these assert that it diverges by numbers.
+
+// How far two degrees are apart, the short way round the scale. A step is 1;
+// anything more is a leap, and degree 6 to degree 0 is a step, not a sixth.
+const apart = (a, b, size) => Math.min((a - b + size) % size, (b - a + size) % size);
+
+const leadNotes = (options, runs = 400) => {
+    const notes = [];
+    for (let i = 0; i < runs; i++) {
+        const { steps } = generateLead({ bar: i % 8, random: pinned(i + 1), ...options });
+        notes.push(steps.map((step, index) => ({ ...step, index })).filter((step) => step.gate === 'note'));
+    }
+    return notes;
+};
+
+check('the Goa lead walks rather than jumps', () => {
+    let moves = 0;
+    let leaps = 0;
+    for (const bar of leadNotes({ scale: phrygian, genre: 'goa' })) {
+        for (let i = 1; i < bar.length; i++) {
+            moves++;
+            if (apart(bar[i].degree, bar[i - 1].degree, phrygian.steps.length) > 1) leaps++;
+        }
+    }
+    if (moves === 0) throw new Error('the lead produced no notes to measure');
+    const rate = leaps / moves;
+    // "Leaps are rare, small, and function as deliberate outlier events (~5–10%
+    // of notes) rather than a phrase norm." Measured at 9.4% over 3000 bars, so
+    // the ceiling is the research's own upper bound plus a point of slack —
+    // an earlier 12% was set above the band to fit the implementation, which is
+    // widening the target rather than hitting it. A line that leaps a fifth of
+    // the time is arpeggiating, which Goa leads are not.
+    if (rate > 0.11) throw new Error(`the Goa lead leaps ${(rate * 100).toFixed(1)}% of the time, wanted the research's ~5–10%`);
+});
+
+check('the ♭2 is the Goa lead\'s colour tone, second only to the root', () => {
+    const counts = new Array(phrygian.steps.length).fill(0);
+    for (const bar of leadNotes({ scale: phrygian, genre: 'goa' })) {
+        for (const note of bar) counts[note.degree]++;
+    }
+    const ranked = counts.map((count, degree) => ({ degree, count }))
+        .sort((a, b) => b.count - a.count);
+    // "Often the second-most-visited note after the root, sitting a semitone
+    // above it" — the one degree that makes Phrygian audible. A ♭2 that
+    // outranks the root is not a colour tone, it is the centre.
+    if (ranked[0].degree !== 0) throw new Error(`degree ${ranked[0].degree} is visited more than the root`);
+    if (ranked[1].degree !== 1) throw new Error(`the second-most-visited degree is ${ranked[1].degree}, not the ♭2`);
+});
+
+check('the Goa motif is coprime with the bar, and precesses against it', () => {
+    const { motif } = LEAD_VOICES.goa;
+    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+    if (gcd(motif, STEPS) !== 1) throw new Error(`a motif of ${motif} is not coprime with ${STEPS} — it cannot precess`);
+
+    // Precession is the claim, and it is only visible across bars: the same
+    // cell read from a different starting place each bar, realigning after
+    // `motif` bars. One bar of it looks like a loop.
+    const shapes = new Set();
+    for (let bar = 0; bar < motif; bar++) {
+        shapes.add(JSON.stringify(generateLead({
+            scale: phrygian, genre: 'goa', bar, random: pinned(42),
+        }).steps.map((step) => (step.gate === 'note' ? step.degree : '.'))));
+    }
+    if (shapes.size < motif - 1) {
+        throw new Error(`${shapes.size} distinct bars across ${motif} — the cell is not precessing`);
+    }
+});
+
+check('a melodic techno phrase starts and ends on a chord tone', () => {
+    // The crux rule, near-verbatim across independent write-ups: "the first and
+    // last note of each phrase must belong to the underlying chord; everything
+    // in between is free within the scale."
+    //
+    // The phrase, not the bar. Asserting it per bar would certify a narrowing
+    // rather than catch it: anchoring every bar constrains a quarter of all
+    // notes, and the free interior is what the rule exists to protect.
+    const progression = PROGRESSIONS[0];
+    for (let phrase = 0; phrase < 4; phrase++) {
+        for (let seed = 1; seed <= 40; seed++) {
+            const bars = Array.from({ length: PHRASE_BARS }, (_, offset) => generateLead({
+                scale: minor,
+                genre: 'melodic-techno',
+                progression,
+                bar: phrase * PHRASE_BARS + offset,
+                random: pinned(phrase * 40 + seed),
+            }));
+            const notes = bars.flatMap((pattern, offset) => pattern.steps
+                .filter((step) => step.gate === 'note')
+                .map((step) => ({ step, bar: phrase * PHRASE_BARS + offset })));
+            if (notes.length === 0) continue;
+
+            for (const boundary of [notes[0], notes.at(-1)]) {
+                const tones = chordTones(chordAt(progression, boundary.bar), minor);
+                if (!tones.includes(boundary.step.degree)) {
+                    throw new Error(`phrase ${phrase}: a boundary sounded degree ${boundary.step.degree}, not a tone of ${tones.join('/')}`);
+                }
+            }
+        }
+    }
+});
+
+check('every lead note is in the scale, in both genres', () => {
+    // "No chromatic passing tones. Stay in the scale of the chords."
+    for (const [genre, scale, progression] of [
+        ['goa', phrygian, STATIC_TONIC],
+        ['melodic-techno', minor, PROGRESSIONS[0]],
+    ]) {
+        for (const bar of leadNotes({ scale, genre, progression }, 200)) {
+            for (const note of bar) {
+                if (!Number.isInteger(note.degree) || note.degree < 0 || note.degree >= scale.steps.length) {
+                    throw new Error(`${genre}: degree ${note.degree} is not in the scale`);
+                }
+                if (note.octave !== 0) throw new Error(`${genre}: a lead note left its octave`);
+            }
+        }
+    }
+});
+
+check('the genres differ by their voice parameters, not by a code path', () => {
+    // The bet, asserted as data: everything that separates a Goa lead from a
+    // melodic techno one is a number in this table. If a future ticket needs a
+    // branch instead, this check is where that shows up as an argument.
+    const goa = LEAD_VOICES.goa;
+    const techno = LEAD_VOICES['melodic-techno'];
+    if (!(goa.leapRate < techno.leapRate)) throw new Error('Goa should leap less than melodic techno');
+    if (goa.colourDegree !== 1) throw new Error('Goa\'s colour tone should be the ♭2');
+    if (techno.colourDegree !== null) throw new Error('melodic techno should weight no colour tone — the research finds no Phrygian in it');
+    if (Object.keys(goa).sort().join() !== Object.keys(techno).sort().join()) {
+        // Different keys would mean one genre carries a parameter the other
+        // cannot express, which is a branch wearing a table's clothes.
+        const only = (a, b) => Object.keys(a).filter((k) => !(k in b));
+        throw new Error(`the two voices have different parameters: ${only(goa, techno).concat(only(techno, goa)).join(', ')}`);
     }
 });
 

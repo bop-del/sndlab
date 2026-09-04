@@ -2221,13 +2221,67 @@ const checks = [
             const gaps = times.slice(1).map((t, i) => Number((t - times[i]).toFixed(4)));
             if (new Set(gaps).size > 1) throw new Error(`the kick is not even: gaps ${gaps.join(', ')}`);
 
-            // And the rule the whole groove rests on: nothing pitched starts
-            // where a kick does.
+            // And the rule the whole groove rests on: no *bass* note starts
+            // where a kick does. The spec scopes this to the bass lane — "the
+            // bass lane never emits a note gate on those steps" — because the
+            // gap is what the bassline is made of. A melody over a kick is
+            // ordinary, and #35's lead sounds on roughly a quarter of them.
+            //
+            // The lanes are told apart by register: the lead sits three octaves
+            // above the bass, so anything below the lead's lowest possible
+            // pitch is bass.
+            const leadFloor = await page.evaluate(async () => {
+                const { noteToFrequency } = await import('/js/audio/pitch.js');
+                const { LEAD_OCTAVES } = await import('/js/ui/Transport.js');
+                const { Transport } = await import('/js/ui/Transport.js');
+                // Derived, not hardcoded: the bass sits two octaves below the
+                // root and the lead LEAD_OCTAVES above that, so the midpoint
+                // moves if either does. A literal here would silently
+                // misclassify every lead note as bass the day that changed.
+                const bassRoot = Transport.root - 24;
+                return noteToFrequency(bassRoot + (LEAD_OCTAVES * 12) / 2);
+            });
             const kickTimes = new Set(times.map((t) => t.toFixed(4)));
             const collisions = started
                 .filter((n) => !isKick(n))
+                .filter((n) => n.frequency < leadFloor)
                 .filter((n) => kickTimes.has(n.when.toFixed(4)));
             if (collisions.length > 0) throw new Error(`${collisions.length} bass notes started on a kick step`);
+        },
+    },
+    {
+        name: 'the lead sounds above the bass, and mutes on its own',
+        async run(page) {
+            const measured = await page.evaluate(async () => {
+                const { noteToFrequency } = await import('/js/audio/pitch.js');
+                const { LEAD_OCTAVES, Transport } = await import('/js/ui/Transport.js');
+                return {
+                    divider: noteToFrequency(Transport.root - 24 + (LEAD_OCTAVES * 12) / 2),
+                };
+            });
+            const above = (spy) => spy.nodes.filter((n) =>
+                n.node === 'oscillator' && n.started && n.frequency > measured.divider);
+
+            await resetSpy(page);
+            await page.click('#play');
+            await page.waitForTimeout(1400);
+            const sounding = above(await audioSpy(page));
+            if (sounding.length === 0) throw new Error('the lead played nothing');
+
+            // Muted, the lane goes silent while the bass keeps going.
+            await page.click('#lead-mute');
+            await resetSpy(page);
+            await page.waitForTimeout(1400);
+            const spy = await audioSpy(page);
+            const stillLead = above(spy);
+            if (stillLead.length > 0) throw new Error(`${stillLead.length} lead notes sounded while muted`);
+            const bass = spy.nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (bass.length === 0) throw new Error('muting the lead silenced the bass too');
+
+            await page.click('#lead-mute');
+            await page.click('#play');
+            const pressed = await page.getAttribute('#lead-mute', 'aria-pressed');
+            if (pressed !== 'true') throw new Error(`the lead toggle reads aria-pressed=${pressed} when sounding`);
         },
     },
     {

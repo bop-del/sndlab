@@ -6,8 +6,17 @@ import { MUSE_PRESETS } from '../audio/Presets.js';
 // one bar, so anything older than a handful has finished — this bounds the set
 // without ever being reached in normal play.
 const VOICE_CAP = 8;
+
+// How far above the bass the lead sits, in octaves.
+//
+// Three above the bass, which is one above the keyboard root — the bass itself
+// sits two below it. The research puts leads "roughly two octaves above the
+// harmony bed", and the bed here is the keyboard's own register rather than
+// the bassline, so this lands where it should and well clear of the bass.
+export const LEAD_OCTAVES = 3;
 import { SCALES } from '../theory/Scales.js';
 import { generateBass, isKickStep } from '../theory/Generator.js';
+import { generateLead } from '../theory/Lead.js';
 import { loopBars, pickProgression } from '../theory/Progressions.js';
 
 // Play, stop and tempo — the controls that turn a generated pattern into
@@ -20,6 +29,7 @@ import { loopBars, pickProgression } from '../theory/Progressions.js';
 export const Transport = {
     clock: null,
     pattern: null,
+    lead: null,
     // The steps this transport started, so stop() can silence its own loop
     // without touching notes the keyboard or the pads are holding.
     sounding: new Set(),
@@ -37,6 +47,7 @@ export const Transport = {
     // URL. Muting the kick is something you do for a moment while judging the
     // line's pitch content, not a property of the line worth sharing.
     kickMuted: false,
+    leadMuted: false,
     // Which genre the next generation follows. The ticket is explicit that a
     // switch takes effect on the *next* generation rather than rewriting the
     // line under the player — changing genre mid-bar would be a different
@@ -50,6 +61,7 @@ export const Transport = {
     // Goa's progression is one chord, so this is a single bar cycling exactly
     // as before; melodic techno's is 8 or 16, so the loop is that long.
     bars: [],
+    leadBars: [],
     bar: 0,
     // Whether the current run has already played its first step. The bar only
     // advances on a step 0 that follows another step — otherwise the very first
@@ -79,6 +91,16 @@ export const Transport = {
         const showTempo = () => { reading.textContent = `${tempo.value} BPM`; };
         showTempo();
 
+        const leadToggle = document.createElement('button');
+        leadToggle.id = 'lead-mute';
+        leadToggle.type = 'button';
+        leadToggle.textContent = 'Lead';
+        leadToggle.setAttribute('aria-pressed', 'true');
+        leadToggle.addEventListener('click', () => {
+            this.leadMuted = !this.leadMuted;
+            leadToggle.setAttribute('aria-pressed', String(!this.leadMuted));
+        });
+
         const genre = document.createElement('select');
         genre.id = 'genre';
         genre.append(new Option('Goa', 'goa'), new Option('Melodic techno', 'melodic-techno'));
@@ -89,8 +111,10 @@ export const Transport = {
             // rolls a line for the genre now selected. A running loop keeps
             // playing what it has.
             this.pattern = null;
+            this.lead = null;
             this.progression = null;
             this.bars = [];
+            this.leadBars = [];
         });
 
         const genreField = document.createElement('label');
@@ -137,7 +161,7 @@ export const Transport = {
 
         const row = document.createElement('div');
         row.className = 'transport';
-        row.append(play, kick, genreField, field, reading);
+        row.append(play, kick, leadToggle, genreField, field, reading);
         container.replaceChildren(row);
 
         // Blur stops the transport as well as the held notes. A loop that keeps
@@ -161,10 +185,14 @@ export const Transport = {
     start() {
         const ctx = AudioEngine.ensureContext();
         this.progression ??= pickProgression({ genre: this.genre });
-        if (this.bars.length === 0) this.bars = this.generate();
+        if (this.bars.length === 0) {
+            this.bars = this.generate(generateBass);
+            this.leadBars = this.generate(generateLead);
+        }
         this.bar = 0;
         this.startedBar = false;
         this.pattern = this.bars[0];
+        this.lead = this.leadBars[0];
 
         this.clock ??= createClock({
             // The engine's clock, read through one function and nowhere else.
@@ -200,8 +228,8 @@ export const Transport = {
      * call; the only thing that differs between them is which chord is coming
      * next, which is what decides whether the bar walks down.
      */
-    generate() {
-        return Array.from({ length: loopBars(this.progression) }, (_, bar) => generateBass({
+    generate(write) {
+        return Array.from({ length: loopBars(this.progression) }, (_, bar) => write({
             scale: this.scale,
             root: this.root,
             genre: this.genre,
@@ -217,6 +245,7 @@ export const Transport = {
         if (step === 0 && this.startedBar) {
             this.bar = (this.bar + 1) % this.bars.length;
             this.pattern = this.bars[this.bar];
+            this.lead = this.leadBars[this.bar];
         }
         this.startedBar = true;
 
@@ -224,6 +253,19 @@ export const Transport = {
         // floor whatever the bass is doing, and the gap the bass leaves on
         // these steps is only audible as groove because this lands in it.
         if (isKickStep(step) && !this.kickMuted) AudioEngine.kickAt(when);
+
+        // The lead, two octaves above the bass. Scheduled before the bass so a
+        // slide chain on one lane cannot swallow the other's step.
+        const leadCell = this.lead?.steps[step];
+        if (leadCell?.gate === 'note' && !this.leadMuted) {
+            const voice = AudioEngine.noteAt(
+                this.degreeToNote(leadCell) + LEAD_OCTAVES * 12,
+                when,
+                this.stepSeconds() * 0.5, // "32nd note length and very short decay"
+                { accent: leadCell.accent, preset: MUSE_PRESETS.lead },
+            );
+            this.hold(voice);
+        }
 
         const cell = this.pattern?.steps[step];
         if (!cell || cell.gate !== 'note') {
@@ -267,19 +309,29 @@ export const Transport = {
             hold: cell.slide,
         });
         this.gliding = { voice, from: cell };
-        this.sounding.add(voice);
+        this.hold(voice);
+    },
 
-        // Stopped, not merely forgotten. Dropping the handle leaves the voice
-        // sounding with nothing able to reach it — and a slid step is held
-        // rather than self-releasing, so an evicted one drones for ever. The
-        // cap exists to bound the set, not to end notes: a self-releasing voice
-        // has already finished by the time it is evicted, and stop() on a
-        // finished voice is a no-op.
-        if (this.sounding.size > VOICE_CAP) {
-            for (const spent of [...this.sounding].slice(0, this.sounding.size - VOICE_CAP)) {
-                if (spent !== this.gliding?.voice) spent.stop();
-                this.sounding.delete(spent);
-            }
+    /**
+     * Keep a handle on a voice this transport started, bounded.
+     *
+     * Stopped when evicted, not merely forgotten: dropping the handle leaves
+     * the voice sounding with nothing able to reach it, and a slid step is held
+     * rather than self-releasing, so an evicted one drones for ever. A
+     * self-releasing voice has already finished by the time it is evicted, and
+     * stop() on a finished voice is a no-op.
+     *
+     * Called by both lanes. It used to sit at the end of the bass path, where
+     * the two early returns above it — a rest step, and a slide continuing a
+     * chain — skipped it entirely; the lead sounds on plenty of steps where the
+     * bass does neither, so the set grew without bound.
+     */
+    hold(voice) {
+        this.sounding.add(voice);
+        if (this.sounding.size <= VOICE_CAP) return;
+        for (const spent of [...this.sounding].slice(0, this.sounding.size - VOICE_CAP)) {
+            if (spent !== this.gliding?.voice) spent.stop();
+            this.sounding.delete(spent);
         }
     },
 

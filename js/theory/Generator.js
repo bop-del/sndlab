@@ -71,10 +71,11 @@ export const COLOUR_DEGREES = [4, 2, 6];
  * "everything hitting at the same volume becomes flat" is a named failure.
  */
 const DENSITY = 0.85;
-const ACCENT_RATE = 0.3;
-const SLIDE_RATE = 0.15;
+// Shared with the lead lane, which articulates the same way.
+export const ACCENT_RATE = 0.3;
+export const SLIDE_RATE = 0.15;
 
-const rest = () => ({ gate: 'rest', degree: 0, octave: 0, accent: false, slide: false });
+export const rest = () => ({ gate: 'rest', degree: 0, octave: 0, accent: false, slide: false });
 
 /**
  * A Goa bassline for the given scale and root, as sixteen steps.
