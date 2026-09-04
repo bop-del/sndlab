@@ -60,8 +60,17 @@ Then confirm the tab will not be stale:
   before testing — the whole point of the build number is answering "is this
   the change I just made?"
 
-Then `open http://localhost:8000/` and tell Boris what build to expect in the
-corner.
+Then open it with the build number as a cache-buster —
+`open "http://localhost:8000/?b36"` — and **ask Boris to confirm the number he
+sees in the corner before testing anything.**
+
+Serving the right build is not the same as showing it. A tab left open from an
+earlier session keeps its cached modules, and #31's walk opened with no
+transport row at all: the server was serving `b36` correctly, the check above
+passed, and the page on screen was still the old one. The query string defeats
+the cache; the confirmation catches the case where it does not.
+
+If the number is wrong or missing, `Cmd+Shift+R`, or a private window.
 
 ## 3. Derive the tests
 
