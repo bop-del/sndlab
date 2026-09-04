@@ -145,12 +145,28 @@ export const MUSE_PRESETS = {
             { type: 'sine', detune: -1200, gain: 0.35 },
         ],
         attack: 0.002,
-        // Sustain 0 with a 70ms decay is the whole ticket: at 138bpm a 16th is
-        // 109ms, so the note is gone with 40ms to spare and the line rolls.
-        decay: 0.07,
+        // Sustain 0 is the whole ticket: the note dies inside its own step
+        // instead of running into the next one, which is what makes a line roll
+        // rather than smear.
+        //
+        // 95ms, not the research's 60–80ms. At 138bpm a 16th is 109ms, so this
+        // is 87% of a step with 14ms of air. The documented range put it at 64%
+        // — inside the same document's "note length 50–75% of a 16th" window,
+        // and audibly too staccato when #33 was accepted by ear. The numbers
+        // are convergent forum folklore with no transcriptions behind them, and
+        // #28 said to expect exactly this.
+        decay: 0.095,
         sustain: 0,
         release: 0.03,
-        peak: 0.16, // the same staging as the Bass preset, for the same reason
+        // 0.11, not the Bass preset's 0.16. Staged lower because these notes
+        // are sequenced rather than played: at 95ms a step they arrive often
+        // enough to sit against the master limiter, which then compressed every
+        // accent from its true 1.41x down to 1.12x — the articulation the
+        // ticket exists to add, flattened before it was heard. Lowering the
+        // source costs nothing in loudness, because the limiter was giving back
+        // what the higher staging took: a full bar renders 0.728 here against
+        // 0.729 at 0.16, and neither clips.
+        peak: 0.11,
         cutoff: 220,
         resonance: 6, // acid-leaning, which is Goa territory
         filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.1, octaves: 2.5 },
