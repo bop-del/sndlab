@@ -1750,6 +1750,7 @@ const checks = [
             if (hit === 'version-tag') throw new Error('the build tag is swallowing clicks');
         },
     },
+
 ];
 
 // ─── Check helpers ───────────────────────────────────────────────────────────
