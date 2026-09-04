@@ -136,10 +136,18 @@ engineering skills (loaded via `cc-sndlab`). The main flow, idea → shipped:
 /to-tickets        split it into tickets with blocking edges — skip it when
                    the work is one coherent change
 /implement         build a ticket; drives /tdd, closes with /code-review
+/accept-ticket     the judgements a verification run cannot make — sound,
+                   layout, feel — walked one at a time, then Done
 ```
 
 Keep grilling, spec and tickets in **one context window** — the spec is the
 first thing that survives a compact. `/implement` then starts fresh per ticket.
+
+`/accept-ticket` is the only step in the flow an agent cannot finish alone: it
+runs the checks, opens the app on a build it has proved is not stale, works out
+what a machine could not have judged, and asks. It is defined in this repo
+(`.claude/skills/accept-ticket/`) rather than the shared engineering skills,
+because it knows about this board, this verification run and this build number.
 
 On-ramps onto that flow, not steps in it:
 

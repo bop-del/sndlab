@@ -2,7 +2,14 @@
 node_modules/
 
 # Work tooling regenerates this on every session start — keep it out of a public repo
-.claude/
+# Ignoring the contents rather than the directory itself: git will not descend
+# into an excluded directory, so a negation under `.claude/` alone never matches.
+.claude/*
+
+# …except this repo's own skills, which are part of how the work is done here
+# and belong in it. They know about this board, this verification run and this
+# build number, so they cannot live in the shared engineering skills repo.
+!.claude/skills/
 
 # Verification-run screenshots — taken every run, assessed by eye, never a baseline
 .screenshots/
