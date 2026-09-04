@@ -509,6 +509,88 @@ const checks = [
         },
     },
     {
+        name: 'no preset clips, however many notes are held',
+        async run(page) {
+            // The first check in this file that measures how *loud* the result
+            // is. Everything else asserts which oscillators started and at what
+            // frequency, which is why issue #25 — the Bass preset clipping
+            // audibly — passed every check while Boris could hear it.
+            //
+            // Rendered offline through the real graph, so this measures the
+            // whole chain: voice gains, the note envelope's peak, the master
+            // trim and the limiter. The page's mute is applied per *live*
+            // context, so an OfflineAudioContext still renders real samples.
+            //
+            // Six voices because that is what the app can actually produce at
+            // once — a triad, a drone, and two hands.
+            //
+            // The spy's `shared.filter` slot is claimed by the *first* filter
+            // built in the page and never reassigned, so rendering here would
+            // hand that slot to a filter belonging to a finished offline
+            // context — and the cutoff check, which reads it, would then watch
+            // a node nothing can move and fail blaming the app. The slot is put
+            // back exactly as found.
+            const measured = await page.evaluate(async () => {
+                const { AudioEngine } = await import('/js/audio/AudioEngine.js');
+                const { PRESETS } = await import('/js/audio/Presets.js');
+                const results = [];
+                const sharedBefore = { ...window.audioSpy.shared };
+
+                for (const preset of PRESETS) {
+                    // A copy, never the live singleton. Rebinding the real
+                    // engine's context and restoring it afterwards was not
+                    // enough: setCutoff() then called ensureContext() on a
+                    // finished offline context and threw, and the cutoff check
+                    // failed blaming the app for what this check had done to
+                    // it. A prototype copy cannot reach the engine's state.
+                    const engine = Object.create(AudioEngine);
+                    const ctx = new OfflineAudioContext(1, 44100 * 2, 44100);
+                    // ensureContext() resumes a context reporting `suspended`,
+                    // and an OfflineAudioContext throws on resume() until it has
+                    // started rendering. That is the engine being right about a
+                    // live context, not a bug to fix there — so the copy is
+                    // handed a context that reports `running`, which is what an
+                    // offline render behaves like once started.
+                    Object.defineProperty(ctx, 'state', { get: () => 'running' });
+                    engine.ctx = ctx;
+                    engine.filter = null;
+                    engine.voices = new Set();
+                    engine.setPreset(preset.id);
+
+                    for (const note of [24, 36, 48, 51, 55, 60]) engine.noteOn(note);
+                    const samples = (await ctx.startRendering()).getChannelData(0);
+
+                    let peak = 0;
+                    let over = 0;
+                    for (let i = 0; i < samples.length; i++) {
+                        const value = Math.abs(samples[i]);
+                        if (value > peak) peak = value;
+                        if (value >= 1) over += 1;
+                    }
+                    results.push({ id: preset.id, peak: Number(peak.toFixed(3)), over });
+                }
+
+                for (const key of Object.keys(window.audioSpy.shared)) delete window.audioSpy.shared[key];
+                Object.assign(window.audioSpy.shared, sharedBefore);
+                return results;
+            });
+
+            for (const { id, peak, over } of measured) {
+                if (over > 0) {
+                    throw new Error(`preset "${id}" clips: peak ${peak}, ${over} sample(s) at or past full scale`);
+                }
+                // Not clipping is the low bar, and a preset sitting at 0.99
+                // clears it while being one edit from failing again. All three
+                // presets render between 0.90 and 0.93 for six voices, so 0.95
+                // is loose enough not to fire on rounding and tight enough that
+                // a preset staged like the old bass — 1.03 — cannot pass.
+                if (peak > 0.95) {
+                    throw new Error(`preset "${id}" has no headroom: peak ${peak}, wanted under 0.95`);
+                }
+            }
+        },
+    },
+    {
         name: 'both presets are offered and can be selected',
         async run(page) {
             const presets = await page.$$eval('#preset option', (os) => os.map((o) => o.value));

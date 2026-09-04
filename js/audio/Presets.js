@@ -67,7 +67,24 @@ export const PRESETS = [
         ],
         attack: 0.004,
         release: 0.15,
-        peak: 0.3,
+        // 0.16, not the 0.3 this shipped with. At 0.3 the preset was staged
+        // roughly twice as hot as the other two — 0.3 x 0.90 voice sum against
+        // the pluck's 0.24 x 0.60 — and a chord with the drone under it
+        // rendered past full scale, 73 samples of it, audibly (issue #25).
+        //
+        // The limiter could not save it. It holds firmly in steady state, but
+        // it tracks a smoothed envelope, not sample peaks, and bass is a
+        // waveform whose peaks swing far above its RMS. Staged this hot the
+        // smoothed level already sat near the ceiling, so individual peaks
+        // crossed it unseen — which is why the crackle ran through the whole
+        // note rather than clicking once on the attack.
+        //
+        // Stopping the clipping is the low bar: 0.24 manages it at 0.998, which
+        // is not clipping and one edit away from it. This value is set by the
+        // rule at the top of this file instead — a six-voice chord renders
+        // 0.929 here, against the pluck's 0.928 and the pad's 0.900. Bass now
+        // has the same headroom as everything else rather than its own.
+        peak: 0.16,
         cutoff: 220,
         resonance: 6, // acid-leaning, which is Goa territory
         filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.1, octaves: 2.5 },
