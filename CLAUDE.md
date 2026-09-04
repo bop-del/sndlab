@@ -135,6 +135,7 @@ engineering skills (loaded via `cc-sndlab`). The main flow, idea → shipped:
 /to-spec           synthesise the conversation into a spec on the tracker
 /to-tickets        split it into tickets with blocking edges — skip it when
                    the work is one coherent change
+/start-ticket      claim the card and cut a branch, before any code exists
 /implement         build a ticket; drives /tdd, closes with /code-review
 /accept-ticket     the judgements a verification run cannot make — sound,
                    layout, feel — walked one at a time, then Done
@@ -143,11 +144,20 @@ engineering skills (loaded via `cc-sndlab`). The main flow, idea → shipped:
 Keep grilling, spec and tickets in **one context window** — the spec is the
 first thing that survives a compact. `/implement` then starts fresh per ticket.
 
+`/start-ticket` and `/accept-ticket` bookend the build, and both live in this
+repo (`.claude/skills/`) rather than the shared engineering skills, because they
+know about this board, this verification run and this build number.
+
+`/start-ticket` exists because `/implement` ends "commit your work to the
+current branch" — it creates nothing. Left alone that means building on `main`,
+with a 1–3 minute auto-deploy in front of it. The skill checks the ticket is
+unblocked and unclaimed, claims the card, and cuts a branch off fresh
+`origin/main`. A worktree only on request, when two tickets genuinely run at
+once (#17).
+
 `/accept-ticket` is the only step in the flow an agent cannot finish alone: it
 runs the checks, opens the app on a build it has proved is not stale, works out
-what a machine could not have judged, and asks. It is defined in this repo
-(`.claude/skills/accept-ticket/`) rather than the shared engineering skills,
-because it knows about this board, this verification run and this build number.
+what a machine could not have judged, and asks.
 
 On-ramps onto that flow, not steps in it:
 
