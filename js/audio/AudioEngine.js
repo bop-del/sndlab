@@ -190,9 +190,37 @@ export const AudioEngine = {
     // each other are most of what separates a synth from a test tone. They
     // share one envelope, so the voice still stops as a single thing.
     noteOn(midiNumber) {
+        // ensureContext() first: startTime() reads the context's clock, and on
+        // the very first note there is no context until this call builds one.
+        this.ensureContext();
+        return this.startVoice(midiNumber, this.startTime());
+    },
+
+    /**
+     * A note that starts at a given time on the audio clock and stops itself.
+     *
+     * What the clock needs and noteOn cannot give it: noteOn starts now and is
+     * held until the caller releases it, which is right for a key under a
+     * finger and wrong for a sequenced step nobody is holding. The duration is
+     * the step's, so the note ends without anything having to remember it.
+     *
+     * `when` comes from the clock and is already past startTime()'s resume
+     * headroom — this must not add its own, or every scheduled note would drift
+     * later than the step it belongs to.
+     */
+    noteAt(midiNumber, when, duration = 0.12) {
+        this.ensureContext();
+        const voice = this.startVoice(midiNumber, when);
+        // Scheduled on the audio clock rather than by a timer: a setTimeout
+        // release would jitter against a sample-accurate start, which is
+        // audible as an uneven gate length.
+        voice.stopAt(when + duration, { holdThroughAttack: false });
+        return voice;
+    },
+
+    startVoice(midiNumber, now) {
         const ctx = this.ensureContext();
         const destination = this.input();
-        const now = this.startTime();
         const { attack, release, peak, voices: layers } = this.preset;
 
         const frequency = noteToFrequency(midiNumber);
@@ -237,24 +265,41 @@ export const AudioEngine = {
         });
 
         let stopped = false;
+
+        // Both paths end a voice the same way; only the time differs. A held
+        // key releases at whatever "now" is when the finger lifts, a sequenced
+        // step at a time the clock decided in advance.
+        const releaseAt = (requested, { holdThroughAttack = true } = {}) => {
+            if (stopped) return;
+            stopped = true;
+            this.voices.delete(voice);
+
+            // A held key is never released before its attack has finished: a
+            // tap let go faster than resume() settles would otherwise end the
+            // note before it began, which is silence again.
+            //
+            // A sequenced step is the opposite case. Its end is decided by the
+            // clock, and stretching it to fit a slow preset's attack would make
+            // every note outlast its own step — on the default pad (attack
+            // 0.25s) a 16th at 138bpm lasts 0.109s, so notes would pile up
+            // three deep and the line would smear into a drone. It is floored
+            // at the start time instead: the envelope simply ends early, which
+            // is quiet rather than wrong.
+            const floor = holdThroughAttack ? now + attack : now;
+            const end = Math.max(requested, floor);
+            // Cancel the attack first: releasing mid-attack otherwise ramps
+            // from a value the scheduler has not reached yet, which clicks.
+            gain.gain.cancelScheduledValues(end);
+            gain.gain.setValueAtTime(Math.max(gain.gain.value, SILENCE), end);
+            gain.gain.exponentialRampToValueAtTime(SILENCE, end + release);
+            for (const osc of oscillators) osc.stop(end + release);
+        };
+
         const voice = {
             midiNumber,
-            stop: () => {
-                if (stopped) return;
-                stopped = true;
-                this.voices.delete(voice);
-
-                // Never before the note was scheduled to start: a tap released
-                // faster than resume() settles would otherwise end the note
-                // before it began, which is silence again.
-                const end = Math.max(this.startTime(), now + attack);
-                // Cancel the attack first: releasing mid-attack otherwise ramps
-                // from a value the scheduler has not reached yet, which clicks.
-                gain.gain.cancelScheduledValues(end);
-                gain.gain.setValueAtTime(Math.max(gain.gain.value, SILENCE), end);
-                gain.gain.exponentialRampToValueAtTime(SILENCE, end + release);
-                for (const osc of oscillators) osc.stop(end + release);
-            },
+            /** Release at an explicit time on the audio clock — the clock's path. */
+            stopAt: (end, options) => releaseAt(end, options),
+            stop: () => releaseAt(this.startTime()),
         };
 
         this.voices.add(voice);

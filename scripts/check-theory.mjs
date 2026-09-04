@@ -11,6 +11,7 @@
 //
 //   node scripts/check-theory.mjs
 
+import { readFileSync } from 'node:fs';
 import { SCALES, chordsIn, degreeName, inScale, noteName, scaleById, triadOn } from '../js/theory/Scales.js';
 import {
     BASS_GRIDS,
@@ -21,6 +22,7 @@ import {
     generateBass,
     isKickStep,
 } from '../js/theory/Generator.js';
+import { LOOKAHEAD, createClock, secondsPerStep } from '../js/audio/Clock.js';
 
 const E = 64; // E4
 const C = 60; // middle C
@@ -282,6 +284,135 @@ check('the rhythm is a template, not a random layer', () => {
     }
     for (const slot of slots) {
         if (!BASS_GRIDS.goa.includes(slot)) throw new Error(`step ${slot} sounded off-grid`);
+    }
+});
+
+// ─── The clock, on fake time ─────────────────────────────────────────────────
+// The scheduler is arithmetic over an injected clock, so it is testable here
+// without a browser — and must be. Asserting a schedule against wall-clock time
+// measures the browser's timer jitter, not the scheduler, and the tolerance
+// needed to make that pass on a loaded machine is wide enough that the check
+// could never fail. The engine actually playing the schedule is asserted in
+// verify.mjs, where there is a real audio graph to watch.
+//
+// `now` is a counter and `wake` a drainable queue: advancing time runs whatever
+// was due, in order, exactly as a real timer would but deterministically.
+function fakeTime() {
+    let t = 0;
+    let queue = [];
+    return {
+        now: () => t,
+        wake: (fn, seconds) => queue.push({ at: t + seconds, fn }),
+        advance(to) {
+            for (;;) {
+                const next = queue.filter((e) => e.at <= to).sort((a, b) => a.at - b.at)[0];
+                if (!next) break;
+                queue = queue.filter((e) => e !== next);
+                t = next.at;
+                next.fn();
+            }
+            t = to;
+        },
+    };
+}
+
+const runClock = (bpm, until, act) => {
+    const time = fakeTime();
+    const played = [];
+    const clock = createClock({
+        now: time.now,
+        wake: time.wake,
+        play: (step, when) => played.push({ step, when }),
+        bpm,
+    });
+    clock.start(0);
+    if (act) act(clock, time);
+    time.advance(until);
+    return { played, clock, time };
+};
+
+check('sixteen steps land at the right offsets for the tempo', () => {
+    const { played } = runClock(120, 2.1);
+    const gap = secondsPerStep(120);
+    if (Math.abs(gap - 0.125) > 1e-12) throw new Error(`a step at 120bpm is ${gap}s, expected 0.125`);
+    played.slice(0, STEPS).forEach(({ step, when }, i) => {
+        if (step !== i) throw new Error(`step ${i} was scheduled as ${step}`);
+        if (Math.abs(when - i * gap) > 1e-9) throw new Error(`step ${i} at ${when}s, expected ${i * gap}s`);
+    });
+});
+
+check('the loop wraps with no gap and no doubled step', () => {
+    const { played } = runClock(120, 2.1);
+    // The seam is the whole risk: step 15 to step 0 must be the same distance
+    // as any other pair, because the next bar is placed by the same addition
+    // rather than as a special case.
+    const gaps = played.slice(1).map((p, i) => Number((p.when - played[i].when).toFixed(9)));
+    if (new Set(gaps).size !== 1) throw new Error(`the loop seams: gaps ${[...new Set(gaps)].join(', ')}`);
+    played.forEach(({ step }, i) => {
+        if (step !== i % STEPS) throw new Error(`step ${i} came out as ${step} — the wrap is wrong`);
+    });
+});
+
+check('a tempo change mid-bar drops no step and duplicates none', () => {
+    const { played } = runClock(120, 2.0, (clock, time) => {
+        time.advance(0.5);
+        clock.setBpm(140);
+    });
+    const times = played.map((p) => p.when);
+    if (!times.every((t, i) => i === 0 || t > times[i - 1])) throw new Error('times are not ascending');
+    if (new Set(times.map((t) => t.toFixed(9))).size !== times.length) throw new Error('a step was scheduled twice');
+    played.forEach(({ step }, i) => {
+        if (i > 0 && step !== (played[i - 1].step + 1) % STEPS) {
+            throw new Error(`step ${step} followed ${played[i - 1].step} — one was dropped`);
+        }
+    });
+    // Both tempos should be represented, and nothing else.
+    const gaps = new Set(played.slice(1).map((p, i) => Number((p.when - played[i].when).toFixed(6))));
+    const expected = [secondsPerStep(120), secondsPerStep(140)].map((g) => Number(g.toFixed(6)));
+    for (const gap of gaps) {
+        if (!expected.includes(gap)) throw new Error(`unexpected step gap ${gap}s`);
+    }
+});
+
+check('stop schedules nothing further', () => {
+    const { played, clock, time } = runClock(120, 1.0);
+    const before = played.length;
+    if (before === 0) throw new Error('nothing was scheduled before stopping');
+    clock.stop();
+    time.advance(20);
+    if (played.length !== before) throw new Error(`${played.length - before} steps scheduled after stop`);
+    if (clock.running) throw new Error('the clock still reports itself running');
+});
+
+check('the clock schedules ahead of the audio clock, never behind it', () => {
+    // A scheduler that hands the engine a time already in the past has failed
+    // even if every gap is right: the note is dropped or played late.
+    const time = fakeTime();
+    const seen = [];
+    const clock = createClock({
+        now: time.now,
+        wake: time.wake,
+        play: (step, when) => seen.push(when - time.now()),
+        bpm: 138,
+    });
+    clock.start(0);
+    time.advance(4);
+    if (seen.some((lead) => lead < 0)) throw new Error('a step was scheduled in the past');
+    if (seen.some((lead) => lead > LOOKAHEAD + 1e-9)) throw new Error('a step was scheduled beyond the lookahead window');
+});
+
+check('the clock reads the audio clock only through the injected function', () => {
+    // Asserted, not documented. A second call site would silently make the fake
+    // clock non-authoritative — every check above would keep passing while
+    // measuring a clock the checks do not control, which is the failure mode
+    // this whole seam exists to prevent.
+    const source = readFileSync(new URL('../js/audio/Clock.js', import.meta.url), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    if (code.includes('currentTime')) {
+        throw new Error('Clock.js reads currentTime directly — it must come in through now()');
+    }
+    if (/\bDate\.now\b|\bperformance\.now\b/.test(code)) {
+        throw new Error('Clock.js reads a wall clock — time must come in through now()');
     }
 });
 

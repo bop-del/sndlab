@@ -85,6 +85,13 @@ function installAudioSpy() {
                     record.type = osc.type;
                     record.frequency = osc.frequency.value;
                     record.started = true;
+                    // The scheduled time, which is the whole claim of a clock:
+                    // that the right note starts at the right moment. Without
+                    // this the spy can only see *that* a note started, and every
+                    // timing assertion would have to be made against wall-clock
+                    // arrival — which measures the browser's jitter, not the
+                    // scheduler. Undefined when start() is called bare.
+                    record.when = a[0];
                     calls.push('oscillator.start');
                     return origStart(...a);
                 };
@@ -1751,6 +1758,163 @@ const checks = [
         },
     },
 
+    // ─── The transport ───────────────────────────────────────────────────────
+    // The schedule itself is asserted on fake time in check-theory.mjs. What is
+    // left for a real browser is the half fake time cannot reach: that the
+    // engine actually played what the clock handed it, and that the rest of the
+    // app still works while it runs.
+    {
+        name: 'play starts the pattern, and the notes are scheduled ahead in order',
+        async run(page) {
+            await resetSpy(page);
+            await page.click('#play');
+            // Deliberately slow: about a bar at the default tempo. Fake time
+            // proves the schedule; only this proves the engine played it.
+            await page.waitForTimeout(1400);
+
+            const started = (await audioSpy(page)).nodes
+                .filter((n) => n.node === 'oscillator' && n.started && typeof n.when === 'number');
+            if (started.length === 0) throw new Error('the transport played nothing');
+
+            // The `when` argument is the whole claim of a clock. Without the
+            // spy capturing it this check could only see that *something*
+            // sounded, not that it sounded on time.
+            // Distinct pitches per step, so several oscillators share one
+            // `when` — the times must not go backwards, and must not all be
+            // the same, which is what a collapsed schedule would look like.
+            const times = started.map((n) => n.when);
+            if (!times.every((t, i) => i === 0 || t >= times[i - 1])) {
+                throw new Error('notes were scheduled out of order');
+            }
+            const distinct = new Set(times.map((t) => t.toFixed(4)));
+            if (distinct.size < 4) {
+                throw new Error(`only ${distinct.size} distinct start times in a bar — the schedule collapsed`);
+            }
+            // A bar at 138bpm is sixteen steps of which the Goa grid can sound
+            // twelve; a couple of stragglers is not a loop.
+            if (distinct.size > 20) throw new Error(`${distinct.size} start times in a bar — more steps than a bar has`);
+
+            await page.click('#play');
+        },
+    },
+    {
+        name: 'stop silences the transport and schedules nothing further',
+        async run(page) {
+            await page.click('#play');
+            await page.waitForTimeout(400);
+            await page.click('#play');
+            await resetSpy(page);
+            // Everything already scheduled has sounded by now; nothing new may
+            // appear, however long we wait.
+            await page.waitForTimeout(900);
+            const after = (await audioSpy(page)).nodes.filter((n) => n.node === 'oscillator' && n.started);
+            if (after.length > 0) throw new Error(`${after.length} notes started after stop`);
+            const pressed = await page.getAttribute('#play', 'aria-pressed');
+            if (pressed !== 'false') throw new Error(`the play button still reads aria-pressed=${pressed}`);
+        },
+    },
+    {
+        name: 'the tempo is settable while the transport runs',
+        async run(page) {
+            await page.click('#play');
+            await page.$eval('#tempo', (el) => {
+                el.value = '160';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            await page.waitForTimeout(300);
+            const reading = await page.textContent('.tempo-reading');
+            if (!reading.includes('160')) throw new Error(`the tempo reads ${reading} after being set to 160`);
+            // Changing tempo must not stop the loop — the whole point is
+            // finding the speed a line wants without stopping.
+            const pressed = await page.getAttribute('#play', 'aria-pressed');
+            if (pressed !== 'true') throw new Error('the transport stopped when the tempo moved');
+            await page.click('#play');
+            // Put it back: the screenshot is taken after the checks run, and a
+            // check that leaves the tempo somewhere else makes the shot lie
+            // about what the app looks like when opened.
+            await page.$eval('#tempo', (el) => {
+                el.value = '138';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        },
+    },
+    {
+        name: 'the keyboard still sounds while the transport runs',
+        async run(page) {
+            await page.click('#play');
+            await page.waitForTimeout(150);
+            await resetSpy(page);
+            await page.keyboard.down('e');
+            await page.waitForTimeout(120);
+            const voices = voicesIn(await audioSpy(page));
+            await page.keyboard.up('e');
+            await page.click('#play');
+            // A muse you cannot play over is not a muse. The clock and the
+            // keyboard share one engine, so this is the check that they do not
+            // fight over it.
+            if (voices.length === 0) throw new Error('a key played nothing while the transport ran');
+        },
+    },
+    {
+        name: 'stopping the transport leaves a held chord alone',
+        async run(page) {
+            // The bug this guards: stop() reaching for every voice in the
+            // engine silences the pad too, and leaves Notes' map claiming it
+            // still sounds — so the pad stays lit, silent, and will not
+            // retrigger. Nothing caught it, because no check pressed Stop with
+            // a note held.
+            await page.click('.pad[data-degree="0"]');
+            await page.click('#play');
+            await page.waitForTimeout(250);
+            await page.click('#play');
+            await page.waitForTimeout(150);
+
+            const sounding = voicesIn(await audioSpy(page)).filter((v) => !v.stopped);
+            if (sounding.length === 0) throw new Error('stopping the transport silenced the held chord');
+
+            const lit = await page.$$eval('.pad--on', (ps) => ps.length);
+            if (lit !== 1) throw new Error(`${lit} pads lit after stop — the pad and its sound disagree`);
+
+            await page.click('.pad[data-degree="0"]');
+            const after = await page.$$eval('.pad--on', (ps) => ps.length);
+            if (after !== 0) throw new Error('the pad would not release after the transport stopped');
+        },
+    },
+    {
+        name: 'blur stops the transport',
+        async run(page) {
+            await page.click('#play');
+            await page.waitForTimeout(150);
+            await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+            await page.waitForTimeout(100);
+            const pressed = await page.getAttribute('#play', 'aria-pressed');
+            // A loop that keeps playing into a backgrounded tab is the one
+            // noise this app must never make.
+            if (pressed !== 'false') throw new Error('the transport survived a blur');
+        },
+    },
+    {
+        name: 'the transport controls are reachable on a phone',
+        async run(page) {
+            const original = page.viewportSize();
+            await page.setViewportSize({ width: 390, height: 844 });
+            const boxes = await page.$$eval('#play, #tempo, .tempo-reading', (els) =>
+                els.map((el) => {
+                    const r = el.getBoundingClientRect();
+                    return { id: el.id || el.className, x: r.x, right: r.right, height: r.height };
+                }));
+            await page.setViewportSize(original);
+            // The row wraps, so the slider is likelier to overflow than the
+            // button — check the whole row, not just the thing being pressed.
+            for (const b of boxes) {
+                if (b.x < 0 || b.right > 390) throw new Error(`${b.id} is off-screen at 390px`);
+            }
+            const box = boxes.find((b) => b.id === 'play');
+            // Comfortably tappable: the button is pressed while the loop runs,
+            // so a fiddly target is a real cost rather than a cosmetic one.
+            if (box.height < 40) throw new Error(`the play button is ${box.height}px tall — too small for a thumb`);
+        },
+    },
 ];
 
 // ─── Check helpers ───────────────────────────────────────────────────────────

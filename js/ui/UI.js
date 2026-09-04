@@ -3,6 +3,7 @@ import { ChordPads } from './ChordPads.js';
 import { Keyboard } from './Keyboard.js';
 import { ScalePicker } from './ScalePicker.js';
 import { SoundControls } from './SoundControls.js';
+import { Transport } from './Transport.js';
 import { Transpose } from './Transpose.js';
 import { VersionTag } from './VersionTag.js';
 
@@ -16,6 +17,9 @@ export const UI = {
         ScalePicker.onChange((root, scale) => {
             Keyboard.showScale(root, scale);
             ChordPads.setScale(root, scale);
+            // The pattern is degrees, not pitches, so a scale change re-pitches
+            // a line already looping rather than invalidating it.
+            Transport.setScale(root, scale);
         });
         ScalePicker.init(document.getElementById('scale-picker'));
 
@@ -27,6 +31,7 @@ export const UI = {
             Keyboard.setTranspose(typingFirst);
         });
         Transpose.init(document.getElementById('transpose'));
+        Transport.init(document.getElementById('transport'));
         SoundControls.init(document.getElementById('sound-controls'));
         VersionTag.init(document.getElementById('version-tag'));
 
