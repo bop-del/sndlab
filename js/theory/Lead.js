@@ -54,7 +54,24 @@ export const LEAD_VOICES = {
         // The walk is pulled home. Without this the root is just one degree of
         // seven and a "walk around the root" wanders away from it — the centre
         // has to be a centre.
-        homeWeight: 0.22,
+        //
+        // 0.18, down from the 0.22 that was right when every bar drew its own
+        // cell. Once one cell repeats across the loop, that pull produced cells
+        // like `1 ♭7 1 ♭7 1 ♭7 1` — two notes oscillating, monotonous heard
+        // seven times over.
+        //
+        // The trade is direct, and 0.18 is the last value that stays inside the
+        // research's 5–10% leap band:
+        //
+        //   home  leaps   two-note cells
+        //   0.22   9.0%   18%
+        //   0.18   9.9%   17%   ← here
+        //   0.12  11.0%   13%
+        //   0.10  11.5%   12%
+        //
+        // Looser cells are available only by leaping more than the genre does,
+        // which is trading one criterion for another rather than improving.
+        homeWeight: 0.18,
         motif: 7,
         density: 0.75,
     },
